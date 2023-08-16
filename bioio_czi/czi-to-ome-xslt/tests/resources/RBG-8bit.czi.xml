@@ -1,0 +1,67 @@
+<ImageDocument>
+ <Metadata>
+  <CustomAttributes />
+  <Information>
+   <Document>
+    <CreationDate>2019-12-06T16:56:03.6510238-08:00</CreationDate>
+    <UserName>Timm</UserName>
+   </Document>
+   <Image>
+    <ComponentBitCount>8</ComponentBitCount>
+    <PixelType>Bgr24</PixelType>
+    <SizeX>924</SizeX>
+    <SizeY>624</SizeY>
+    <SizeT>1</SizeT>
+    <Dimensions>
+     <T>
+      <StartTime>0001-01-01T00:00:00</StartTime>
+     </T>
+    </Dimensions>
+   </Image>
+  </Information>
+  <Scaling>
+   <Metadata />
+   <AutoScaling>
+    <Type>Measured</Type>
+    <Objective>Objective.420640-9900-000</Objective>
+    <Optovar>Aquila.Tubelens 1.0x ext.</Optovar>
+    <Reflector>Reflector.none</Reflector>
+    <CameraAdapter>YokogawaCameraAdapter.1.2x</CameraAdapter>
+    <ObjectiveName>Plan-Apochromat 10x/0.45 M27</ObjectiveName>
+    <OptovarMagnification>1</OptovarMagnification>
+    <ReflectorMagnification>1</ReflectorMagnification>
+    <CameraName>Camera 2 (Left)</CameraName>
+    <CameraAdapterMagnification>1.2</CameraAdapterMagnification>
+    <CameraPixelDistance>13,13</CameraPixelDistance>
+    <CreationDateTime>12/06/2019 23:55:02</CreationDateTime>
+   </AutoScaling>
+   <Items>
+    <Distance Id="X">
+     <Value>1.0833333333333333E-06</Value>
+     <DefaultUnitFormat>µm</DefaultUnitFormat>
+    </Distance>
+    <Distance Id="Y">
+     <Value>1.0833333333333333E-06</Value>
+     <DefaultUnitFormat>µm</DefaultUnitFormat>
+    </Distance>
+   </Items>
+  </Scaling>
+  <DisplaySetting>
+   <Channels>
+    <Channel Id="Channel:0" Name="C1">
+     <BitCountRange>8</BitCountRange>
+     <PixelType>Bgr24</PixelType>
+     <DyeName>Dye1</DyeName>
+     <ColorMode>None</ColorMode>
+    </Channel>
+   </Channels>
+   <ToneMapping>
+    <Mode>None</Mode>
+    <EnhanceClipLimit>3</EnhanceClipLimit>
+    <EnhanceRegionSizePercentage>15</EnhanceRegionSizePercentage>
+   </ToneMapping>
+   <ViewerRotations>0</ViewerRotations>
+  </DisplaySetting>
+  <Layers />
+ </Metadata>
+</ImageDocument>
