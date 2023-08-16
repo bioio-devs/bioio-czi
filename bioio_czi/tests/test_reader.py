@@ -7,8 +7,8 @@ from typing import List, Tuple
 import numpy as np
 import pytest
 from _aicspylibczi import PylibCZI_CDimCoordinatesOverspecifiedException
-
 from bioio_base import dimensions, exceptions, test_utilities
+
 from bioio_czi import Reader
 
 from .conftest import LOCAL_RESOURCES_DIR

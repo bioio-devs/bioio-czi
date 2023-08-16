@@ -4,8 +4,9 @@ from typing import Union
 from xml.etree import ElementTree as ET
 
 import lxml.etree
-from ome_types import OME
 from bioio_base.types import PathLike
+from ome_types import OME
+
 
 def generate_ome_image_id(image_id: Union[str, int]) -> str:
     """
@@ -44,6 +45,7 @@ def generate_ome_channel_id(image_id: str, channel_id: Union[str, int]) -> str:
     -------
     ome_channel_id: str
         The OME standard for channel IDs.
+
 
     Notes
     -----

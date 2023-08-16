@@ -120,7 +120,7 @@ def upload_test_resources(args: Args):
                     if len(user_input) == 0:
                         user_input = "y"
                     # Get first character and lowercase
-                    else:
+                    else: 
                         user_input = user_input[0].lower()
 
                         # Set confirmation from None to a value

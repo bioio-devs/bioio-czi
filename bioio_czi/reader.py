@@ -10,25 +10,22 @@ from typing import Any, Dict, Hashable, List, Optional, Tuple, Union
 import dask.array as da
 import numpy as np
 import xarray as xr
+from _aicspylibczi import BBox, TileInfo
+from aicspylibczi import CziFile
+from bioio_base import constants, exceptions
+from bioio_base import io as io_utils
+from bioio_base import types
+from bioio_base.dimensions import (
+    DEFAULT_CHUNK_DIMS,
+    REQUIRED_CHUNK_DIMS,
+    DimensionNames,
+    Dimensions,
+)
+from bioio_base.reader import Reader as BaseReader
 from dask import delayed
 from fsspec.implementations.local import LocalFileSystem
 from fsspec.spec import AbstractFileSystem
 from ome_types.model.ome import OME
-
-from bioio_base import constants, exceptions, types
-from bioio_base import io as io_utils
-
-from bioio_base.dimensions import (
-    Dimensions, 
-    DEFAULT_CHUNK_DIMS, 
-    REQUIRED_CHUNK_DIMS, 
-    DimensionNames,
-)
-
-from bioio_base.reader import Reader as BaseReader
-
-from _aicspylibczi import BBox, TileInfo
-from aicspylibczi import CziFile
 
 from . import utils as metadata_utils
 
@@ -85,6 +82,7 @@ class Reader(BaseReader):
     -----
     To use this reader, install with: `pip install aicspylibczi>=3.1.1`.
     """
+
     _xarray_dask_data: Optional["xr.DataArray"] = None
     _xarray_data: Optional["xr.DataArray"] = None
     _mosaic_xarray_dask_data: Optional["xr.DataArray"] = None
@@ -788,7 +786,7 @@ class Reader(BaseReader):
         else:
             ans = np.zeros(arr_shape_list, dtype=data.dtype)
 
-        for (tile_info, box) in tile_bboxes.items():
+        for tile_info, box in tile_bboxes.items():
             # Construct data indexes to use
             tile_dims = tile_info.dimension_coordinates
             tile_dims.pop(CZI_SCENE_DIM_CHAR, None)

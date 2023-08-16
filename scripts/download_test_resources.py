@@ -56,7 +56,7 @@ class Args(argparse.Namespace):
         )
 
         # Parse
-        p.parse_args(namespace=self)
+        p.parse_args(namespace=self) 
 
 
 ###############################################################################
