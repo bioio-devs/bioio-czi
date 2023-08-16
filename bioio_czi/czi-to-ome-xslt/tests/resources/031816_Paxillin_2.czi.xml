@@ -1,0 +1,515 @@
+<ImageDocument>
+ <Metadata>
+  <Version>1.0</Version>
+  <Information>
+   <User>
+    <DisplayName>LSM User</DisplayName>
+   </User>
+   <Document>
+    <Name>031816_Paxillin_2</Name>
+    <Description />
+    <Comment />
+    <UserName>LSM User</UserName>
+    <CreationDate>2016-03-18T19:11:51</CreationDate>
+    <SubType>Image</SubType>
+    <Rating>0</Rating>
+    <Title>031816_Paxillin_2</Title>
+   </Document>
+   <Image>
+    <OriginalScanData>true</OriginalScanData>
+    <PixelType>Gray16</PixelType>
+    <ComponentBitCount>16</ComponentBitCount>
+    <SizeX>844</SizeX>
+    <SizeY>844</SizeY>
+    <SizeZ>33</SizeZ>
+    <SizeC>2</SizeC>
+    <MicroscopeRef Id="Microscope:0" />
+    <ObjectiveSettings>
+     <ObjectiveRef Id="Objective:0" />
+     <Medium>Water</Medium>
+     <RefractiveIndex>1.333</RefractiveIndex>
+    </ObjectiveSettings>
+    <Dimensions>
+     <Channels>
+      <Channel Id="1839519600122812675519032900062270448942" Name="ChS1">
+       <IlluminationType>Epifluorescence</IlluminationType>
+       <ContrastMethod>Fluorescence</ContrastMethod>
+       <PinholeSizeAiry>0.97105992001158026</PinholeSizeAiry>
+       <Fluor>EGFP</Fluor>
+       <DetectionWavelength>
+        <Ranges>463.30191200000002-650.39208800000006</Ranges>
+       </DetectionWavelength>
+       <ExcitationWavelength>488.00000000000006</ExcitationWavelength>
+       <EmissionWavelength>556.84699999999998</EmissionWavelength>
+       <AcquisitionMode>LaserScanningConfocalMicroscopy</AcquisitionMode>
+       <LaserScanInfo>
+        <PixelTime>5.1515151515151518e-007</PixelTime>
+        <ZoomX>2.5</ZoomX>
+        <ZoomY>2.5</ZoomY>
+        <SampleRotation>0</SampleRotation>
+        <SampleOffsetX>0</SampleOffsetX>
+        <SampleOffsetY>0</SampleOffsetY>
+        <LineTime>3.0000000000000001e-005</LineTime>
+        <FrameTime>13.746253575757576</FrameTime>
+        <ScanningMode>Frame</ScanningMode>
+        <Averaging>16</Averaging>
+       </LaserScanInfo>
+       <ChannelType>Unspecified</ChannelType>
+       <DetectorSettings>
+        <Detector Id="Detector:0:0" />
+        <Binning>1x1</Binning>
+        <PhotonConversionFactor>68.670977799529211</PhotonConversionFactor>
+        <Gain>1053.090909090909</Gain>
+        <DigitalGain>1</DigitalGain>
+        <Offset>0</Offset>
+       </DetectorSettings>
+       <LightSourcesSettings>
+        <LightSourceSettings>
+         <LightSource Id="LightSource:1" />
+         <Attenuation>0.96999999999999997</Attenuation>
+         <Wavelength>488.00000000000006</Wavelength>
+         <Polarization>
+          <StokesParameter1>1</StokesParameter1>
+          <StokesParameter2>1</StokesParameter2>
+          <StokesParameter3>0</StokesParameter3>
+          <StokesParameter4>0</StokesParameter4>
+         </Polarization>
+        </LightSourceSettings>
+       </LightSourcesSettings>
+       <AiryscanSettings>
+        <Mode>Off</Mode>
+        <VirtualPinholeSize>1</VirtualPinholeSize>
+        <Magnification>1</Magnification>
+        <TransformationXX>4.3435001326511731e-311</TransformationXX>
+        <TransformationXY>4.3435001326511731e-311</TransformationXY>
+        <TransformationYX>4.3435001326511731e-311</TransformationYX>
+        <TransformationYY>4.3435001326511731e-311</TransformationYY>
+       </AiryscanSettings>
+      </Channel>
+      <Channel Id="71636460310927323441690180172659701842" Name="T PMT">
+       <IlluminationType>Epifluorescence</IlluminationType>
+       <ContrastMethod>Other</ContrastMethod>
+       <AcquisitionMode>LaserScanningConfocalMicroscopy</AcquisitionMode>
+       <LaserScanInfo>
+        <PixelTime>5.1515151515151518e-007</PixelTime>
+        <ZoomX>2.5</ZoomX>
+        <ZoomY>2.5</ZoomY>
+        <SampleRotation>0</SampleRotation>
+        <SampleOffsetX>0</SampleOffsetX>
+        <SampleOffsetY>0</SampleOffsetY>
+        <LineTime>3.0000000000000001e-005</LineTime>
+        <FrameTime>13.746253575757576</FrameTime>
+        <ScanningMode>Frame</ScanningMode>
+        <Averaging>16</Averaging>
+       </LaserScanInfo>
+       <ChannelType>Unspecified</ChannelType>
+       <DetectorSettings>
+        <Detector Id="Detector:0:1" />
+        <Binning>1x1</Binning>
+        <PhotonConversionFactor>68.670977799529211</PhotonConversionFactor>
+        <Gain>206.98051948051943</Gain>
+        <DigitalGain>1</DigitalGain>
+        <Offset>0</Offset>
+       </DetectorSettings>
+       <LightSourcesSettings>
+        <LightSourceSettings>
+         <LightSource Id="LightSource:1" />
+         <Attenuation>0.96999999999999997</Attenuation>
+         <Wavelength>488.00000000000006</Wavelength>
+         <Polarization>
+          <StokesParameter1>1</StokesParameter1>
+          <StokesParameter2>1</StokesParameter2>
+          <StokesParameter3>0</StokesParameter3>
+          <StokesParameter4>0</StokesParameter4>
+         </Polarization>
+        </LightSourceSettings>
+       </LightSourcesSettings>
+       <AiryscanSettings>
+        <Mode>Off</Mode>
+        <VirtualPinholeSize>1</VirtualPinholeSize>
+        <Magnification>1</Magnification>
+        <TransformationXX>4.3435001326511731e-311</TransformationXX>
+        <TransformationXY>4.3435001326511731e-311</TransformationXY>
+        <TransformationYX>4.3435001326511731e-311</TransformationYX>
+        <TransformationYY>4.3435001326511731e-311</TransformationYY>
+       </AiryscanSettings>
+      </Channel>
+     </Channels>
+     <Tracks>
+      <Track Id="Track:0">
+       <ChannelRefs>
+        <ChannelRef Id="1839519600122812675519032900062270448942" />
+        <ChannelRef Id="71636460310927323441690180172659701842" />
+       </ChannelRefs>
+      </Track>
+     </Tracks>
+     <T>
+      <Positions>
+       <BinaryList>
+        <AttachmentName>TimeStamps</AttachmentName>
+       </BinaryList>
+      </Positions>
+     </T>
+     <Z>
+      <StartPosition>0</StartPosition>
+      <Positions>
+       <Interval>
+        <Start>0</Start>
+        <Increment>0.53840242889673151</Increment>
+       </Interval>
+      </Positions>
+     </Z>
+     <S>
+      <Scenes>
+       <Scene Index="0">
+        <Positions>
+         <Position X="-8307.85" Y="6544.74" Z="1618.01" />
+        </Positions>
+       </Scene>
+      </Scenes>
+     </S>
+    </Dimensions>
+   </Image>
+   <Instrument Id="Instrument:0">
+    <Microscopes>
+     <Microscope Id="Microscope:0">
+      <System>LSM 880 Indimo, AxioObserver</System>
+     </Microscope>
+    </Microscopes>
+    <Detectors>
+     <Detector Id="Detector:0:0">
+      <Gain>1</Gain>
+      <Zoom>1</Zoom>
+      <AmplificationGain>1</AmplificationGain>
+      <Manufacturer>
+       <Model />
+      </Manufacturer>
+     </Detector>
+     <Detector Id="Detector:0:1">
+      <Gain>1</Gain>
+      <Zoom>1</Zoom>
+      <AmplificationGain>1</AmplificationGain>
+      <Manufacturer>
+       <Model />
+      </Manufacturer>
+     </Detector>
+    </Detectors>
+    <Objectives>
+     <Objective Id="Objective:0">
+      <Immersion>Water</Immersion>
+      <LensNA>1.2000000000000002</LensNA>
+      <NominalMagnification>40</NominalMagnification>
+      <Manufacturer>
+       <Model>C-Apochromat 40x/1.2 W Korr FCS M27</Model>
+      </Manufacturer>
+     </Objective>
+    </Objectives>
+   </Instrument>
+   <Application>
+    <Name>AIMApplication</Name>
+    <Version>11,0,0,190</Version>
+   </Application>
+  </Information>
+  <DisplaySetting>
+   <Channels>
+    <Channel Id="1839519600122812675519032900062270448942" Name="ChS1">
+     <ColorMode>Color</ColorMode>
+     <Low>-0</Low>
+     <High>0.89874113069352246</High>
+     <Gamma>1</Gamma>
+     <IsSelected>true</IsSelected>
+     <ChannelUnit>
+      <FactorI>1</FactorI>
+      <OffsetI>0</OffsetI>
+      <UnitI>Unknown</UnitI>
+      <ChannelType>Unspecified</ChannelType>
+     </ChannelUnit>
+     <DyeName>EGFP</DyeName>
+     <Color>#00FF00</Color>
+    </Channel>
+    <Channel Id="71636460310927323441690180172659701842" Name="T PMT">
+     <ColorMode>Color</ColorMode>
+     <Low>-0</Low>
+     <High>0.18736552986953536</High>
+     <Gamma>1</Gamma>
+     <IsSelected>false</IsSelected>
+     <ChannelUnit>
+      <FactorI>1</FactorI>
+      <OffsetI>0</OffsetI>
+      <UnitI>Unknown</UnitI>
+      <ChannelType>Unspecified</ChannelType>
+     </ChannelUnit>
+     <Color>#FFFFFF</Color>
+    </Channel>
+   </Channels>
+  </DisplaySetting>
+  <Scaling>
+   <Items>
+    <Distance Id="X">
+     <Value>1.0073367506524087e-007</Value>
+    </Distance>
+    <Distance Id="Y">
+     <Value>1.0073367506524087e-007</Value>
+    </Distance>
+    <Distance Id="Z">
+     <Value>5.3840242889673146e-007</Value>
+    </Distance>
+   </Items>
+  </Scaling>
+  <Layers />
+  <Appliances>
+   <Appliance Id="ShuttleAndFind:1">
+    <Data>
+     <ShuttleAndFindData>
+      <Calibration>
+       <Markers>
+        <Marker Id="Marker:1" StageXPosition="0" StageYPosition="0" FocusPosition="0" />
+        <Marker Id="Marker:2" StageXPosition="0" StageYPosition="0" FocusPosition="0" />
+        <Marker Id="Marker:3" StageXPosition="0" StageYPosition="0" FocusPosition="0" />
+       </Markers>
+       <StageOrientation Y="-1" X="-1" />
+       <MicroscopeType>LM</MicroscopeType>
+      </Calibration>
+     </ShuttleAndFindData>
+    </Data>
+   </Appliance>
+  </Appliances>
+  <CustomAttributes>
+   <LsmTag Name="CarlZeissAim.IncubatorState.Actual_CO2_Module" Type="double">5</LsmTag>
+   <LsmTag Name="CarlZeissAim.IncubatorState.Switch_CO2_Module" Type="boolean">true</LsmTag>
+   <LsmTag Name="CarlZeissAim.IncubatorState.Actual_TempChannel1" Type="double">37</LsmTag>
+   <LsmTag Name="CarlZeissAim.IncubatorState.Actual_TempChannel2" Type="double">37</LsmTag>
+   <LsmTag Name="CarlZeissAim.IncubatorState.Actual_TempChannel4" Type="double">37</LsmTag>
+   <LsmTag Name="CarlZeissAim.IncubatorState.Switch_TempChannel1" Type="boolean">false</LsmTag>
+   <LsmTag Name="CarlZeissAim.IncubatorState.Switch_TempChannel2" Type="boolean">true</LsmTag>
+   <LsmTag Name="CarlZeissAim.IncubatorState.Switch_TempChannel4" Type="boolean">true</LsmTag>
+  </CustomAttributes>
+  <Experiment>
+   <ExperimentBlockIndex>0</ExperimentBlockIndex>
+   <ExperimentBlocks>
+    <AcquisitionBlock>
+     <AcquisitionModeSetup>
+      <BiDirectional>false</BiDirectional>
+      <BiDirectionalZ>false</BiDirectionalZ>
+      <BitsPerSample>16</BitsPerSample>
+      <CameraBinning>1</CameraBinning>
+      <CameraFrameHeight>1030</CameraFrameHeight>
+      <CameraFrameOffsetX>0</CameraFrameOffsetX>
+      <CameraFrameOffsetY>0</CameraFrameOffsetY>
+      <CameraFrameWidth>1300</CameraFrameWidth>
+      <CameraSuperSampling>0</CameraSuperSampling>
+      <DimensionT>10</DimensionT>
+      <DimensionX>844</DimensionX>
+      <DimensionY>844</DimensionY>
+      <DimensionZ>33</DimensionZ>
+      <FilterMethod>Average</FilterMethod>
+      <FilterMode>Line</FilterMode>
+      <FilterSamplingNumber>16</FilterSamplingNumber>
+      <FitFramesizeToRoi>false</FitFramesizeToRoi>
+      <HdrEnabled>false</HdrEnabled>
+      <HdrImagingMode>0</HdrImagingMode>
+      <HdrIntensity>1</HdrIntensity>
+      <HdrNumFrames>1</HdrNumFrames>
+      <InterpolationY>1</InterpolationY>
+      <Objective>C-Apochromat 40x/1.2 W Korr FCS M27</Objective>
+      <OffsetX>0</OffsetX>
+      <OffsetY>0</OffsetY>
+      <OffsetZ>8.6138777246953851e-006</OffsetZ>
+      <ReferenceZ>0.0016266259999999999</ReferenceZ>
+      <PixelPeriod>5.1515151515151518e-007</PixelPeriod>
+      <Rotation>0</Rotation>
+      <AcquisitionMode>StackFocus</AcquisitionMode>
+      <RtBinning>1</RtBinning>
+      <RtFrameHeight>512</RtFrameHeight>
+      <RtFrameWidth>512</RtFrameWidth>
+      <RtLinePeriod>3.0000000000000001e-005</RtLinePeriod>
+      <RtOffsetX>0</RtOffsetX>
+      <RtOffsetY>0</RtOffsetY>
+      <RtRegionHeight>512</RtRegionHeight>
+      <RtRegionWidth>512</RtRegionWidth>
+      <RtSuperSampling>1</RtSuperSampling>
+      <RtZoom>1</RtZoom>
+      <ScalingX>1.0073367506524087e-007</ScalingX>
+      <ScalingY>1.0073367506524087e-007</ScalingY>
+      <ScalingZ>5.3840242889673146e-007</ScalingZ>
+      <SimRotations>3</SimRotations>
+      <TimeSeries>false</TimeSeries>
+      <TrackMultiplexType>Frame</TrackMultiplexType>
+      <UseRois>false</UseRois>
+      <ZoomX>2.5</ZoomX>
+      <ZoomY>2.5</ZoomY>
+      <PreScan>false</PreScan>
+      <FocusStabilizer>false</FocusStabilizer>
+      <ScannerOnlineCorrection>true</ScannerOnlineCorrection>
+      <WaitState>false</WaitState>
+     </AcquisitionModeSetup>
+     <TimeSeriesSetup>
+      <StartMode>
+       <DigitalOut />
+       <Manual />
+      </StartMode>
+      <StopMode>
+       <DigitalOut />
+       <Manual />
+      </StopMode>
+     </TimeSeriesSetup>
+     <ZStackSetup>
+      <StackBrightnessCorrection>false</StackBrightnessCorrection>
+      <StackBrightnessCorrections>
+       <Positions />
+       <Extrapolate>false</Extrapolate>
+       <Interpolation>Cubic</Interpolation>
+      </StackBrightnessCorrections>
+     </ZStackSetup>
+     <MultiTrackSetup>
+      <TrackSetup Name="Track 1">
+       <Attenuators>
+        <Attenuator>
+         <Wavelength>4.8800000000000003e-007</Wavelength>
+         <Transmission>0.029999999999999999</Transmission>
+         <LaserSuppression>false</LaserSuppression>
+         <ExcitationIntensity>0</ExcitationIntensity>
+         <Laser>ArgonRemote</Laser>
+         <Polarization_Stokes0>1</Polarization_Stokes0>
+         <Polarization_Stokes1>1</Polarization_Stokes1>
+         <Polarization_Stokes2>0</Polarization_Stokes2>
+         <Polarization_Stokes3>0</Polarization_Stokes3>
+        </Attenuator>
+       </Attenuators>
+       <BeamSplitters>
+        <BeamSplitter>
+         <Identifier>MainBeamSplitterDescanned1</Identifier>
+         <Filter>MBS 488/561</Filter>
+         <BeamSplitterServoPosition>0</BeamSplitterServoPosition>
+        </BeamSplitter>
+        <BeamSplitter>
+         <Identifier>MainBeamSplitterDescanned2</Identifier>
+         <Filter>Plate</Filter>
+         <BeamSplitterServoPosition>0</BeamSplitterServoPosition>
+        </BeamSplitter>
+        <BeamSplitter>
+         <Identifier>DichroicBeamSplitterDescanned1</Identifier>
+         <Filter>Mirror</Filter>
+         <BeamSplitterServoPosition>0</BeamSplitterServoPosition>
+        </BeamSplitter>
+        <BeamSplitter>
+         <Identifier>MainBeamSplitterNonDescanned</Identifier>
+         <Filter>Rear</Filter>
+         <BeamSplitterServoPosition>0</BeamSplitterServoPosition>
+        </BeamSplitter>
+       </BeamSplitters>
+       <BleachSetup />
+       <Collimators>
+        <Collimator>
+         <Name>LSMCOLLI_NLO</Name>
+         <Position>3040</Position>
+        </Collimator>
+        <Collimator>
+         <Name>LSMCOLLI_V</Name>
+         <Position>839</Position>
+        </Collimator>
+        <Collimator>
+         <Name>LSMCOLLI_V2</Name>
+         <Position>863</Position>
+        </Collimator>
+       </Collimators>
+       <Detectors>
+        <Detector Name="" Id="1839519600122812675519032900062270448942">
+         <DetectorIdentifier>SpectralImager1</DetectorIdentifier>
+         <PureRatioSource>false</PureRatioSource>
+         <ImageChannelName>ChS1</ImageChannelName>
+         <Voltage>1053.090909090909</Voltage>
+         <AmplifierGain>1</AmplifierGain>
+         <AmplifierOffset>0</AmplifierOffset>
+         <PinholeDiameter>4.1230799999999998e-005</PinholeDiameter>
+         <SpectralScanChannels>32</SpectralScanChannels>
+         <Dye>EGFP</Dye>
+         <Folder>EGFP</Folder>
+         <Palette>LsmDetectorPalette_0_0</Palette>
+         <Color>#00FF00</Color>
+         <DetectorMode>Integration</DetectorMode>
+         <DigitalGain>1</DigitalGain>
+         <DigitalOffset>0</DigitalOffset>
+         <LaserSuppression>true</LaserSuppression>
+         <DetectorWavelengthRanges>
+          <DetectorWavelengthRange>
+           <WavelengthStart>4.6330191200000003e-007</WavelengthStart>
+           <WavelengthEnd>6.5039208800000005e-007</WavelengthEnd>
+          </DetectorWavelengthRange>
+         </DetectorWavelengthRanges>
+         <AiryScanMode>Off</AiryScanMode>
+         <AiryScanVirtualPinholeSize>1</AiryScanVirtualPinholeSize>
+         <AiryScanMagnification>1</AiryScanMagnification>
+         <AiryScanTransformationXX>4.3435001326511731e-311</AiryScanTransformationXX>
+         <AiryScanTransformationXY>4.3435001326511731e-311</AiryScanTransformationXY>
+         <AiryScanTransformationYX>4.3435001326511731e-311</AiryScanTransformationYX>
+         <AiryScanTransformationYY>4.3435001326511731e-311</AiryScanTransformationYY>
+        </Detector>
+        <Detector Name="" Id="71636460310927323441690180172659701842">
+         <DetectorIdentifier>NonDescannedTransmissionPmt1</DetectorIdentifier>
+         <PureRatioSource>false</PureRatioSource>
+         <ImageChannelName>T PMT</ImageChannelName>
+         <Voltage>206.98051948051943</Voltage>
+         <AmplifierGain>1</AmplifierGain>
+         <AmplifierOffset>0</AmplifierOffset>
+         <PinholeDiameter>0</PinholeDiameter>
+         <SpectralScanChannels>32</SpectralScanChannels>
+         <Dye />
+         <Folder />
+         <Palette>LsmDetectorPalette_0_1</Palette>
+         <Color>#FFFFFF</Color>
+         <DetectorMode>Integration</DetectorMode>
+         <DigitalGain>1</DigitalGain>
+         <DigitalOffset>0</DigitalOffset>
+         <LaserSuppression>true</LaserSuppression>
+         <AiryScanMode>Off</AiryScanMode>
+         <AiryScanVirtualPinholeSize>1</AiryScanVirtualPinholeSize>
+         <AiryScanMagnification>1</AiryScanMagnification>
+         <AiryScanTransformationXX>4.3435001326511731e-311</AiryScanTransformationXX>
+         <AiryScanTransformationXY>4.3435001326511731e-311</AiryScanTransformationXY>
+         <AiryScanTransformationYX>4.3435001326511731e-311</AiryScanTransformationYX>
+         <AiryScanTransformationYY>4.3435001326511731e-311</AiryScanTransformationYY>
+        </Detector>
+       </Detectors>
+       <CenterWavelength>5.5239247200000001e-007</CenterWavelength>
+       <CondensorFrontlensPosition>-1</CondensorFrontlensPosition>
+       <CondensorRevolverFilter>HF</CondensorRevolverFilter>
+       <TubeLensPosition>Lens LSM</TubeLensPosition>
+       <FieldStopPosition>-1</FieldStopPosition>
+       <CondensorAperture>0.55007643890000002</CondensorAperture>
+       <FilterTransmission>-1</FilterTransmission>
+       <CameraIntegrationTime>5.1515151515151518e-007</CameraIntegrationTime>
+       <DeviceMode>LSM_ChannelMode</DeviceMode>
+       <TransmittedLightLampIntensity>0</TransmittedLightLampIntensity>
+       <ReflectedLightLampIntensity>0</ReflectedLightLampIntensity>
+       <LaserSuppressionMode>None</LaserSuppressionMode>
+       <TirfAngle>0</TirfAngle>
+       <PalmSlider>true</PalmSlider>
+       <SimGratingPeriod>0</SimGratingPeriod>
+       <FWLive405Position />
+       <FWFOVPosition />
+      </TrackSetup>
+     </MultiTrackSetup>
+     <TilesSetup>
+      <PositionGroups>
+       <PositionGroup>
+        <AutoFocusMode>Off</AutoFocusMode>
+        <AutoFocusOffset>0</AutoFocusOffset>
+       </PositionGroup>
+      </PositionGroups>
+     </TilesSetup>
+     <Lasers>
+      <Laser>
+       <LaserPower>0.02</LaserPower>
+       <LaserName>DPSS 561-10</LaserName>
+      </Laser>
+      <Laser>
+       <LaserPower>0.024</LaserPower>
+       <LaserName>ArgonRemote</LaserName>
+      </Laser>
+     </Lasers>
+    </AcquisitionBlock>
+   </ExperimentBlocks>
+  </Experiment>
+ </Metadata>
+</ImageDocument>

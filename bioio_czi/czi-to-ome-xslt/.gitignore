@@ -6,9 +6,6 @@ __pycache__/
 # C extensions
 *.so
 
-# Test files 
-bioio_czi/tests/resources
-
 # Distribution / packaging
 .Python
 env/
@@ -70,8 +67,7 @@ instance/
 
 # Sphinx documentation
 docs/_build/
-docs/bioio_czi.*rst
-docs/modules.rst
+docs/aicsxslt.*rst
 
 # PyBuilder
 target/
@@ -112,5 +108,9 @@ ENV/
 # mypy
 .mypy_cache/
 
-# VSCode
-.vscode
+# Project specific
+produced.ome.xml
+
+# IDEs
+.idea/
+.vscode/
