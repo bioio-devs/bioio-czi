@@ -18,6 +18,7 @@
 # relative to the documentation root, use os.path.abspath to make it
 # absolute, like shown here.
 #
+
 import os
 import sys
 
@@ -161,6 +162,28 @@ latex_documents = [
 ]
 
 
+# -- Options for manual page output ------------------------------------
+
+# One entry per manual page. List of tuples
+# (source start file, name, description, authors, manual section).
+man_pages = [(main_doc, "bioio_czi", "bioio-czi Documentation", [author], 1)]
+
+
+# -- Options for Texinfo output ----------------------------------------
+
+# Grouping the document tree into Texinfo files. List of tuples
+# (source start file, target name, title, author,
+#  dir menu entry, description, category)
+texinfo_documents = [
+    (
+        main_doc,
+        "bioio_czi",
+        "bioio-czi Documentation",
+        author,
+        "bioio_czi",
+        "A BioIO reader plugin for reading czi images.",
+    ),
+]
 # -- Options for manual page output ------------------------------------
 
 # One entry per manual page. List of tuples
