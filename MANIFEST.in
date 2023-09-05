@@ -1,1 +1,1 @@
-recursive-include bioio_czi *.xsl
+recursive-include bioio_czi/czi-to-ome-xslt *
