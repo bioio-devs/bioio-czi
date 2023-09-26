@@ -24,6 +24,12 @@ clean:
 install:
 	pip install -e .[lint,test,docs]
 
+# install dependencies, setup pre-commit, download test resources
+setup-dev:
+	just install
+	pre-commit install
+	python scripts/download_test_resources.py
+	
 # lint, format, and check all files
 lint:
 	pre-commit run --all-files
