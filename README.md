@@ -1,7 +1,7 @@
 # bioio-czi
 
-[![Build Status](https://github.com/bioio-devs/bioio-czi/workflows/CI/badge.svg)](https://github.com/bioio-devs/bioio-czi/actions)
-[![Documentation](https://github.com/bioio-devs/bioio-czi/workflows/Documentation/badge.svg)](https://bioio-devs.github.io/bioio-czi)
+[![Build Status](https://github.com/bioio-devs/bioio-czi/actions/workflows/ci.yml/badge.svg)](https://github.com/bioio-devs/bioio-czi/actions)
+[![Documentation](https://github.com/bioio-devs/bioio-czi/actions/workflows/docs.yml/badge.svg)](https://bioio-devs.github.io/bioio-czi)
 
 A Bioio reader plugin for reading czi images.
 
