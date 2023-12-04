@@ -56,17 +56,6 @@ test = [
   "pytest-raises>=0.11",
   "quilt3",  # no pin to avoid pip cycling (boto is really hard to manage)
 ]
-docs = [
-  # Sphinx + Doc Gen + Styling
-  "m2r2>=0.2.7",
-  "Sphinx>=4.0.0",
-  "furo>=2022.4.7",
-  # Extensions
-  "numpydoc",
-  "sphinx-copybutton",
-  # TODO: Pins
-  "docutils>=0.18,<0.19",
-]
 
 # entry points
 # https://peps.python.org/pep-0621/#entry-points
@@ -108,7 +97,6 @@ ignore = [
   "Justfile",
   ".cookiecutter.yaml",
   "scripts/*",
-  "*docs/*",
 
 ]
 
