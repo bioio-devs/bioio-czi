@@ -27,7 +27,7 @@ from .. import metadata as metadata_utils
 from ..bounding_box import size
 from ..channels import get_channel_names
 from ..pixel_sizes import get_physical_pixel_sizes
-from .subblock_metadata import time_between_subblocks
+from .subblock_metadata import elapsed_time_all_subblocks, time_between_subblocks
 
 ###############################################################################
 
@@ -979,6 +979,8 @@ class Reader(BaseReader):
     def total_time_duration(self) -> Optional[str]:
         """
         Extracts the total duration of the timelapse in milliseconds.
+        This is the time between the first and last acquisition.
+
         Returns
         -------
         Optional[str]
@@ -989,17 +991,7 @@ class Reader(BaseReader):
         try:
             with self._fs.open(self._path) as open_resource:
                 czi = CziFile(open_resource.f)
-
-                # Get the number of time points (SizeT)
-                size_t_element = czi.meta.find(".//SizeT")
-                if size_t_element is None or not size_t_element.text:
-                    return None
-
-                last_timepoint = int(size_t_element.text) - 1
-
-                duration = time_between_subblocks(
-                    czi, start_subblock_index=0, end_subblock_index=last_timepoint
-                )
+                duration = elapsed_time_all_subblocks(czi)
                 return str(duration) if duration is not None else None
 
         except Exception as exc:
