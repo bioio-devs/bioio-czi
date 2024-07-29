@@ -27,14 +27,14 @@ classifiers = [
 ]
 dynamic = ["version"]
 dependencies = [
-  "aicspylibczi>=3.1.1",
+  "aicspylibczi>=3.2.0",
   "bioio-base>=0.2.0",
-  "dask[array]>=2021.4.1,<=2023.5.0",
+  "dask[array]>=2021.4.1",
   "fsspec>=2022.8.0",
   "lxml>=4.6,<5",
-  "numpy>=1.16,<=1.24.0",
+  "numpy>=1.16",
   "ome-types>=0.3.4",
-  "xarray>=0.16.1,<2023.02.0",
+  "xarray>=0.16.1",
 ]
 
 [project.urls]
