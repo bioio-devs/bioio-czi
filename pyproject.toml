@@ -29,7 +29,7 @@ dynamic = ["version"]
 dependencies = [
   "aicspylibczi>=3.1.1",
   "bioio-base>=0.2.0",
-  "dask[array]>=2021.4.1,<=2023.5.0",
+  "dask[array]>=2021.4.1",
   "fsspec>=2022.8.0",
   "lxml>=4.6,<5",
   "numpy>=1.16,<=1.24.0",
