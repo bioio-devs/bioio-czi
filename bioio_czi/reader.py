@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 
 import logging
-import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, ContextManager, Dict, List, Optional, Tuple, Union
 
@@ -22,10 +21,12 @@ from bioio_base.reader import Reader as BaseReader
 from dask import delayed
 from fsspec.implementations.local import LocalFileSystem
 from fsspec.spec import AbstractFileSystem
+from lxml import etree
 from ome_types.model.ome import OME
 from pylibCZIrw import czi
 
 from . import ome as metadata_utils
+from .xml import xml_metadata
 
 ###############################################################################
 
@@ -177,7 +178,7 @@ class Reader(BaseReader):
         if self._scenes is None:
             with open_czi_typed(self._path) as file:
                 xpath_str = "./Metadata/Information/Image/Dimensions/S/Scenes/Scene"
-                meta_scenes = file.metadata.findall(xpath_str)
+                meta_scenes = xml_metadata(file).findall(xpath_str)
                 scene_names: List[str] = []
 
                 # mapping of scene name to occurrences, indicating duplication.
@@ -189,12 +190,14 @@ class Reader(BaseReader):
                         scene_name = meta_scene.get("Name")
                         combined_scene_name = f"{scene_name}-{shape_name}"
                     else:
-                        combined_scene_name = meta_scene.get("Name")
+                        optional_combined_scene_name = meta_scene.get("Name")
                         # Some scene names can be unpopulated, for those we should fill
                         # with filename-idx
-                        if combined_scene_name is None:
+                        if optional_combined_scene_name is None:
                             fname_prefix = Path(self._path).stem
                             combined_scene_name = f"{fname_prefix}-{scene_idx}"
+                        else:
+                            combined_scene_name = optional_combined_scene_name
                         # Check for duplicated names
                         # first encounter with a duplicate modify original scene name
                         # to reflect its new duplicate status
@@ -544,7 +547,7 @@ class Reader(BaseReader):
 
     @staticmethod
     def _get_coords_and_physical_px_sizes(
-        xml: ET.Element, scene_index: int, dims_shape: Dict[str, Any]
+        xml: etree._Element, scene_index: int, dims_shape: Dict[str, Any]
     ) -> Tuple[Dict[str, Any], types.PhysicalPixelSizes]:
         # Create coord dict
         coords: Dict[str, Any] = {}
@@ -670,7 +673,7 @@ class Reader(BaseReader):
             image_data = self._create_dask_array(file)
 
             # Create coordinate planes
-            meta = file.metadta
+            meta = xml_metadata(file)
             coords, px_sizes = self._get_coords_and_physical_px_sizes(
                 xml=meta,
                 scene_index=self.current_scene_index,
@@ -730,7 +733,7 @@ class Reader(BaseReader):
             )
 
             # Get metadata
-            meta = file.meta
+            meta = xml_metadata(file)
 
             # Create coordinate planes
             coords, px_sizes = self._get_coords_and_physical_px_sizes(
