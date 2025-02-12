@@ -13,7 +13,7 @@ name = "bioio-czi"
 description = "A Bioio reader plugin for reading czi images."
 keywords = []
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.9,<3.12"
 license = { text = "MIT License" }
 authors = [
   { email = "brian.whitney@alleninstitute.org", name = "bioio-devs" },
