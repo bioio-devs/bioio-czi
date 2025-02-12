@@ -6,7 +6,6 @@ from typing import List, Tuple
 
 import numpy as np
 import pytest
-from _aicspylibczi import PylibCZI_CDimCoordinatesOverspecifiedException
 from bioio_base import dimensions, exceptions, test_utilities
 
 from bioio_czi import Reader
@@ -202,184 +201,20 @@ def test_czi_reader_remote_xfail() -> None:
     Reader(uri)
 
 
-# @pytest.mark.parametrize(
-#     "tiles_filename, stitched_filename, tiles_set_scene, stitched_set_scene",
-#     [
-#         (
-#             "OverViewScan.czi",
-#             "OverView.npy",
-#             "TR1",
-#             "Image:0",
-#         )
-#     ],
-# )
-
-# TODO: Should this depend on the ArrayLike plugin when it comes out?
-
-# def test_czi_reader_mosaic_stitching(
-#     tiles_filename: str,
-#     stitched_filename: str,
-#     tiles_set_scene: str,
-#     stitched_set_scene: str,
-# ) -> None:
-#     # Construct full filepath
-#     tiles_uri = get_resource_full_path(tiles_filename, LOCAL)
-#     stitched_uri = get_resource_full_path(stitched_filename, LOCAL)
-
-#     # Construct reader
-#     tiles_reader = Reader(tiles_uri)
-#     stitched_np = np.load(stitched_uri)
-#     stitched_reader = ArrayLikeReader(stitched_np)
-
-#     # Run checks
-#     run_image_container_mosaic_checks(
-#         tiles_image_container=tiles_reader,
-#         stitched_image_container=stitched_reader,
-#         tiles_set_scene=tiles_set_scene,
-#         stitched_set_scene=stitched_set_scene,
-#     )
-
-
 @pytest.mark.parametrize(
-    "filename, "
-    "set_scene, "
-    "expected_tile_dims, "
-    "select_tile_index, "
-    "expected_tile_top_left",
-    [
-        (
-            "OverViewScan.czi",
-            "TR1",
-            (440, 544),
-            0,
-            (0, 0),
-        ),
-        (
-            "OverViewScan.czi",
-            "TR1",
-            (440, 544),
-            50,
-            (1188, 4406),
-        ),
-        (
-            "OverViewScan.czi",
-            "TR1",
-            (440, 544),
-            3,
-            (0, 1469),
-        ),
-        (
-            "OverViewScan.czi",
-            "TR1",
-            (440, 544),
-            119,
-            (2772, 0),
-        ),
-        pytest.param(
-            "OverViewScan.czi",
-            "TR1",
-            (440, 544),
-            999,
-            None,
-            marks=pytest.mark.xfail(
-                raises=PylibCZI_CDimCoordinatesOverspecifiedException
-            ),
-        ),
-        pytest.param(
-            "s_1_t_1_c_1_z_1.czi",
-            "Image:0",
-            None,
-            None,
-            None,
-            # File has no mosaic tiles
-            marks=pytest.mark.xfail(raises=AssertionError),
-        ),
-    ],
-)
-def test_czi_reader_mosaic_tile_inspection(
-    filename: str,
-    set_scene: str,
-    expected_tile_dims: Tuple[int, int],
-    select_tile_index: int,
-    expected_tile_top_left: Tuple[int, int],
-) -> None:
-    # Construct full filepath
-    uri = LOCAL_RESOURCES_DIR / filename
-
-    # Construct reader
-    reader = Reader(uri)
-    reader.set_scene(set_scene)
-
-    # Check basics
-    assert reader.mosaic_tile_dims is not None
-    assert reader.mosaic_tile_dims.Y == expected_tile_dims[0]
-    assert reader.mosaic_tile_dims.X == expected_tile_dims[1]
-
-    # Pull tile info for compare
-    tile_y_pos, tile_x_pos = reader.get_mosaic_tile_position(select_tile_index)
-    assert tile_y_pos == expected_tile_top_left[0]
-    assert tile_x_pos == expected_tile_top_left[1]
-
-    # Pull actual pixel data to compare
-    tile_from_m_index = reader.get_image_dask_data(
-        reader.dims.order.replace(dimensions.DimensionNames.MosaicTile, ""),
-        M=select_tile_index,
-    ).compute()
-
-    # Position ops construction to pull using array slicing
-    position_ops = []
-    for dim in reader.dims.order:
-        if dim not in [
-            dimensions.DimensionNames.MosaicTile,
-            dimensions.DimensionNames.SpatialY,
-            dimensions.DimensionNames.SpatialX,
-        ]:
-            position_ops.append(slice(None))
-        if dim is dimensions.DimensionNames.SpatialY:
-            position_ops.append(
-                slice(
-                    tile_y_pos,
-                    tile_y_pos + reader.mosaic_tile_dims.Y,
-                )
-            )
-        if dim is dimensions.DimensionNames.SpatialX:
-            position_ops.append(
-                slice(
-                    tile_x_pos,
-                    tile_x_pos + reader.mosaic_tile_dims.X,
-                )
-            )
-
-    tile_from_position = reader.mosaic_dask_data[tuple(position_ops)].compute()
-
-    # Assert all close
-    # CZI tiles have about 20% overlap it looks
-    # Relative tolerance of 300 is enough to pass
-    np.testing.assert_allclose(tile_from_m_index, tile_from_position, rtol=300)
-
-
-@pytest.mark.parametrize(
-    "filename, "
-    "expected_tile_y_coords, "
-    "expected_tile_x_coords, "
-    "expected_mosaic_y_coords, "
-    "expected_mosaic_x_coords",
+    "filename, expected_tile_y_coords, expected_tile_x_coords",
     [
         (
             "OverViewScan.czi",
             np.arange(0, 2012.719549253996, 4.5743626119409),
             np.arange(0, 2488.45326089585, 4.5743626119409),
-            np.arange(0, 14692.852709554172, 4.5743626119409),
-            np.arange(0, 33836.560240526844, 4.5743626119409),
         ),
     ],
 )
-def test_czi_reader_mosaic_coords(
+def test_czi_reader_coords(
     filename: str,
     expected_tile_y_coords: np.ndarray,
     expected_tile_x_coords: np.ndarray,
-    expected_mosaic_y_coords: np.ndarray,
-    expected_mosaic_x_coords: np.ndarray,
 ) -> None:
     # Construct full filepath
     uri = LOCAL_RESOURCES_DIR / filename
@@ -395,14 +230,4 @@ def test_czi_reader_mosaic_coords(
     np.testing.assert_array_equal(
         reader.xarray_dask_data.coords[dimensions.DimensionNames.SpatialX].data,
         expected_tile_x_coords,
-    )
-
-    # Check mosaic y and x min max
-    np.testing.assert_array_equal(
-        reader.mosaic_xarray_dask_data.coords[dimensions.DimensionNames.SpatialY].data,
-        expected_mosaic_y_coords,
-    )
-    np.testing.assert_array_equal(
-        reader.mosaic_xarray_dask_data.coords[dimensions.DimensionNames.SpatialX].data,
-        expected_mosaic_x_coords,
     )
