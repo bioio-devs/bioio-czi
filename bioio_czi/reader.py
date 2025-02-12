@@ -25,7 +25,7 @@ from fsspec.spec import AbstractFileSystem
 from ome_types.model.ome import OME
 from pylibCZIrw import czi
 
-from . import utils as metadata_utils
+from . import ome as metadata_utils
 
 ###############################################################################
 
