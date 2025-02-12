@@ -84,8 +84,6 @@ class Reader(BaseReader):
 
     _xarray_dask_data: Optional["xr.DataArray"] = None
     _xarray_data: Optional["xr.DataArray"] = None
-    _mosaic_xarray_dask_data: Optional["xr.DataArray"] = None
-    _mosaic_xarray_data: Optional["xr.DataArray"] = None
     _dims: Optional[Dimensions] = None
     _metadata: Optional[Any] = None
     _scenes: Optional[Tuple[str, ...]] = None
@@ -411,9 +409,9 @@ class Reader(BaseReader):
 
         # Construct the delayed dask array
         dims_shape = Reader._dims_shape_to_scene_dims_shape(
-            czi.get_dims_shape(),
+            file.get_dims_shape(),  # TODO not defined
             scene_index=self.current_scene_index,
-            consistent=czi.shape_is_consistent,
+            consistent=file.shape_is_consistent,  # TODO not defined
         )
 
         # Remove block dim as not useful
