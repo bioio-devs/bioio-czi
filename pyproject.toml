@@ -14,12 +14,13 @@ description = "A Bioio reader plugin for reading czi images."
 keywords = []
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "MIT License" }
+license = { file = "LICENSE" }
 authors = [
   { email = "brian.whitney@alleninstitute.org", name = "bioio-devs" },
 ]
 classifiers = [
   "Development Status :: 4 - Beta",
+  "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
   "Natural Language :: English",
   "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
