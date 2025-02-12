@@ -4,7 +4,7 @@
 import logging
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, ContextManager, Dict, List, Optional, Tuple, Union
 
 import dask.array as da
 import numpy as np
@@ -151,7 +151,7 @@ class Reader(BaseReader):
     @property
     def mapped_dims(self) -> str:
         if self._mapped_dims is None:
-            with czi.open_czi(self._path) as file:
+            with open_czi_typed(self._path) as file:
                 self._mapped_dims = Reader._fix_czi_dims(file.dims)
 
         return self._mapped_dims
@@ -175,7 +175,7 @@ class Reader(BaseReader):
             Tuple[str, ...]: Scene names/id
         """
         if self._scenes is None:
-            with czi.open_czi(self._path) as file:
+            with open_czi_typed(self._path) as file:
                 xpath_str = "./Metadata/Information/Image/Dimensions/S/Scenes/Scene"
                 meta_scenes = file.metadata.findall(xpath_str)
                 scene_names: List[str] = []
@@ -354,8 +354,7 @@ class Reader(BaseReader):
             read_dims = {}
 
         # Init czi
-        file: czi.CziReader
-        with czi.open_czi(path) as file:
+        with open_czi_typed(path) as file:
             # Get current scene read dims
             adjusted_scene_index = Reader._adjust_scene_index(
                 file.get_dims_shape(), scene, file.shape_is_consistent
@@ -656,9 +655,8 @@ class Reader(BaseReader):
         exceptions.UnsupportedFileFormatError
             The file could not be read or is not supported.
         """
-        file: czi.CziReader
-        with czi.open_czi(self._path) as file:
-            assert type(file) == czi.CziReader
+        # TODO: DRY with _read_immediate
+        with open_czi_typed(self._path) as file:
             dims_shape = Reader._dims_shape_to_scene_dims_shape(
                 dims_shape=file.get_dims_shape(),
                 scene_index=self.current_scene_index,
@@ -717,9 +715,7 @@ class Reader(BaseReader):
         exceptions.UnsupportedFileFormatError
             The file could not be read or is not supported.
         """
-        file: czi.CziReader
-        with czi.open_czi(self._path) as file:
-            assert type(file) == czi.CziReader
+        with open_czi_typed(self._path) as file:
             dims_shape = Reader._dims_shape_to_scene_dims_shape(
                 dims_shape=file.get_dims_shape(),
                 scene_index=self.current_scene_index,
@@ -824,10 +820,7 @@ class Reader(BaseReader):
         if DimensionNames.MosaicTile not in self.dims.order:
             raise exceptions.UnexpectedShapeError("No mosaic dimension in image.")
 
-        file: czi.CziReader
-        with czi.open_czi(self._path) as file:
-            assert type(file) == czi.CziReader
-
+        with open_czi_typed(self._path) as file:
             # Default Channel and Time dimensions to 0 to improve
             # worst case read time for large files **only**
             # when those dimensions are present on the image.
@@ -868,10 +861,7 @@ class Reader(BaseReader):
         if DimensionNames.MosaicTile not in self.dims.order:
             raise exceptions.UnexpectedShapeError("No mosaic dimension in image.")
 
-        file: czi.CziReader
-        with czi.open_czi(self._path) as file:
-            assert type(file) == czi.CziReader
-
+        with open_czi_typed(self._path) as file:
             tile_info_to_bboxes = file.get_all_mosaic_tile_bounding_boxes(
                 S=self.current_scene_index, **kwargs
             )
@@ -887,3 +877,15 @@ class Reader(BaseReader):
                 m_indexes_to_mosaic_positions[m_index]
                 for m_index in sorted(m_indexes_to_mosaic_positions.keys())
             ]
+
+
+def open_czi_typed(
+    filepath: str,
+    file_input_type: czi.ReaderFileInputTypes = czi.ReaderFileInputTypes.Standard,
+    cache_options: czi.CacheOptions | None = None,
+) -> ContextManager[czi.CziReader]:
+    """
+    Wrapper around czi.open_czi to provide type hinting that clarifies the result
+    is a czi.CziReader
+    """
+    return czi.open_czi(filepath, file_input_type, cache_options)
