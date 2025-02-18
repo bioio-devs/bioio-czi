@@ -44,6 +44,8 @@ CZI_SCENE_DIM_CHAR = "S"
 PIXEL_DICT = {
     "gray8": np.uint8,
     "gray16": np.uint16,
+    # TODO handle other capitalized pixel types
+    "Gray16": np.uint16,
     "gray32": np.uint32,
     "gray32float": np.float32,
     "bgr24": np.uint8,
@@ -71,21 +73,17 @@ class Reader(BaseReader):
         DimensionNames.Samples, will always be added to the list if not present during
         dask array construction.
     include_subblock_metadata: bool
-        Whether to append metadata from the subblocks to the rest of the embeded
+        Whether to append metadata from the subblocks to the rest of the embedded
         metadata.
     fs_kwargs: Dict[str, Any]
         Any specific keyword arguments to pass down to the fsspec created filesystem.
         Default: {}
-
-    Notes
-    -----
-    To use this reader, install with: `pip install aicspylibczi>=3.1.1`.
     """
 
     _xarray_dask_data: Optional["xr.DataArray"] = None
     _xarray_data: Optional["xr.DataArray"] = None
     _dims: Optional[Dimensions] = None
-    _metadata: Optional[Any] = None
+    _metadata: Optional[etree._Element] = None
     _scenes: Optional[Tuple[str, ...]] = None
     _current_scene_index: int = 0
     # Do not provide default value because
@@ -148,10 +146,20 @@ class Reader(BaseReader):
             )
 
     @property
+    def metadata(self) -> etree._Element:
+        if self._metadata is None:
+            with open_czi_typed(self._path) as file:
+                self._metadata = xml_metadata(file)
+        return self._metadata
+
+    @property
     def mapped_dims(self) -> str:
         if self._mapped_dims is None:
             with open_czi_typed(self._path) as file:
-                self._mapped_dims = Reader._fix_czi_dims(file.dims)
+                # TODO clean up
+                self._mapped_dims = Reader._fix_czi_dims(
+                    "".join(list(file.total_bounding_box.keys()))
+                )
 
         return self._mapped_dims
 
@@ -220,8 +228,11 @@ class Reader(BaseReader):
                     scene_names = [metadata_utils.generate_ome_image_id(0)]
                 else:
                     # reconcile scene list against the dims shape
-                    dims_shape = czi.get_dims_shape()
-                    if len(scene_names) != len(dims_shape) and czi.shape_is_consistent:
+                    # dims_shape = file.get_dims_shape()
+                    dims_shape = file.total_bounding_box
+                    if len(scene_names) != len(
+                        dims_shape
+                    ):  # TODO and file.shape_is_consistent:
                         dims_shape_dict = dims_shape[0]
                         scene_range = dims_shape_dict.get(CZI_SCENE_DIM_CHAR)
                         if scene_range is not None:
@@ -358,7 +369,7 @@ class Reader(BaseReader):
         with open_czi_typed(path) as file:
             # Get current scene read dims
             adjusted_scene_index = Reader._adjust_scene_index(
-                file.get_dims_shape(), scene, file.shape_is_consistent
+                file.total_bounding_box, scene, False  # TODO file.shape_is_consistent
             )
             read_dims[CZI_SCENE_DIM_CHAR] = adjusted_scene_index
 
@@ -408,18 +419,23 @@ class Reader(BaseReader):
         self.chunk_dims = [d.upper() for d in self.chunk_dims]
 
         # Construct the delayed dask array
-        dims_shape = Reader._dims_shape_to_scene_dims_shape(
-            file.get_dims_shape(),  # TODO not defined
-            scene_index=self.current_scene_index,
-            consistent=file.shape_is_consistent,  # TODO not defined
-        )
+        # TODO ok so maybe we can use total_bounding_box instead which says
+        # "The plane dimensions are constant across scenes."? Gotta figure
+        # out if we actually need the scene bounding box
+        dims_shape = file.total_bounding_box
+        # Reader._dims_shape_to_scene_dims_shape(
+        #     file.total_bounding_box(),  # TODO this no longer includes 'S' (scene)
+        #     scene_index=self.current_scene_index,
+        #     consistent=file.shape_is_consistent,  # TODO not defined
+        # )
 
         # Remove block dim as not useful
         dims_shape.pop(CZI_BLOCK_DIM_CHAR, None)
 
-        dims_str = czi.dims
-        for remove_dim_char in [CZI_BLOCK_DIM_CHAR, CZI_SCENE_DIM_CHAR]:
-            dims_str = dims_str.replace(remove_dim_char, "")
+        # TODO name this variable clearly
+        dims_set = set(dims_shape.keys())
+        # TODO why are these removed?
+        dims_set = dims_set.difference({CZI_BLOCK_DIM_CHAR, CZI_SCENE_DIM_CHAR})
 
         # Get the shape for the chunk and operating shape for the dask array
         # We also collect the chunk and non chunk dimension ordering so that we can
@@ -429,7 +445,7 @@ class Reader(BaseReader):
         operating_shape = []
         non_chunk_dimension_ordering = []
         chunk_dimension_ordering = []
-        for i, dim in enumerate(dims_str):
+        for dim in dims_set:
             # Unpack dim info
             _, dim_size = dims_shape[dim]
 
@@ -474,9 +490,7 @@ class Reader(BaseReader):
         # multi-index plus the begin index for that plane. We then set the value of the
         # array at the same multi-index to the delayed reader using the constructed
         # read_dims dictionary.
-        dims = [
-            d for d in czi.dims if d not in [CZI_BLOCK_DIM_CHAR, CZI_SCENE_DIM_CHAR]
-        ]
+        dims = list(dims_set)
         begin_indicies = tuple(dims_shape[d][0] for d in dims)
         for np_index, _ in np.ndenumerate(lazy_arrays):
             # Add the czi file begin index for each dimension to the array dimension
@@ -498,9 +512,12 @@ class Reader(BaseReader):
                 this_chunk_read_dims.pop(d, None)
 
             # Get pixel type and catch unsupported
-            pixel_type = PIXEL_DICT.get(czi.pixel_type)
+            # TODO handle case where multiple pixel types are used
+            # TODO name this variable better
+            pixel_type_given = list(file.pixel_types.values())[0]
+            pixel_type = PIXEL_DICT.get(pixel_type_given)
             if pixel_type is None:
-                raise TypeError(f"Pixel type: {czi.pixel_type} is not supported.")
+                raise TypeError(f"Pixel type: {pixel_type_given} is not supported.")
 
             # Add delayed array to lazy arrays at index
             lazy_arrays[np_index] = da.from_delayed(
@@ -522,22 +539,23 @@ class Reader(BaseReader):
         # we will need to transpose back to original dimension ordering
         # Example being, if the original dimension ordering was "SZYX" and we want to
         # chunk by "S", "Y", and "X" we created an array with dimensions ordering "ZSYX"
-        transpose_indices = []
-        transpose_required = False
-        for i, d in enumerate(dims_str):
-            new_index = blocked_dimension_order.index(d)
-            if new_index != i:
-                transpose_required = True
-                transpose_indices.append(new_index)
-            else:
-                transpose_indices.append(i)
+        # TODO bring this back
+        # transpose_indices = []
+        # transpose_required = False
+        # for i, d in enumerate(dims_str):
+        #     new_index = blocked_dimension_order.index(d)
+        #     if new_index != i:
+        #         transpose_required = True
+        #         transpose_indices.append(new_index)
+        #     else:
+        #         transpose_indices.append(i)
 
         # Only run if the transpose is actually required
         # The default case is "Z", "Y", "X", which _usually_ doesn't need to be
         # transposed because that is _usually_ the normal dimension order of the CZI
         # file anyway
-        if transpose_required:
-            merged = da.transpose(merged, tuple(transpose_indices))
+        # if transpose_required:
+        #     merged = da.transpose(merged, tuple(transpose_indices))
 
         # Because dimensions outside of Y and X can be in any order and present or not
         # we also return the dimension order string.
@@ -656,16 +674,13 @@ class Reader(BaseReader):
         exceptions.UnsupportedFileFormatError
             The file could not be read or is not supported.
         """
-        # TODO: DRY with _read_immediate
         with open_czi_typed(self._path) as file:
-            dims_shape = Reader._dims_shape_to_scene_dims_shape(
-                dims_shape=file.get_dims_shape(),
-                scene_index=self.current_scene_index,
-                consistent=file.shape_is_consistent,
-            )
-
-            # Get dims as list for xarray
-            img_dims_list = list(self.mapped_dims)
+            dims_shape = file.total_bounding_box
+            # dims_shape = Reader._dims_shape_to_scene_dims_shape(
+            #     dims_shape=file.get_dims_shape(),
+            #     scene_index=self.current_scene_index,
+            #     consistent=file.shape_is_consistent,
+            # )
 
             # Get image data
             image_data = self._create_dask_array(file)
@@ -679,9 +694,10 @@ class Reader(BaseReader):
             )
 
             # Append subblock metadata to the other metadata if param is True
-            if self._include_subblock_metadata:
-                subblocks = czi.read_subblock_metadata(unified_xml=True)
-                meta.append(subblocks)
+            # TODO do we need this??
+            # if self._include_subblock_metadata:
+            #    subblocks = file.read_subblock_metadata(unified_xml=True)
+            #    meta.append(subblocks)
 
             # Store pixel sizes
             self._px_sizes = px_sizes
@@ -696,7 +712,7 @@ class Reader(BaseReader):
             else:
                 return xr.DataArray(
                     image_data,
-                    dims=img_dims_list,
+                    dims=list(self.mapped_dims),
                     coords=coords,
                     attrs={constants.METADATA_UNPROCESSED: meta},
                 )
@@ -717,11 +733,12 @@ class Reader(BaseReader):
             The file could not be read or is not supported.
         """
         with open_czi_typed(self._path) as file:
-            dims_shape = Reader._dims_shape_to_scene_dims_shape(
-                dims_shape=file.get_dims_shape(),
-                scene_index=self.current_scene_index,
-                consistent=file.shape_is_consistent,
-            )
+            dims_shape = file.total_bounding_box
+            # dims_shape = Reader._dims_shape_to_scene_dims_shape(
+            #     dims_shape=file.get_dims_shape(),
+            #     scene_index=self.current_scene_index,
+            #     consistent=file.shape_is_consistent,
+            # )
 
             # Get image data
             image_data, _ = self._get_image_data(

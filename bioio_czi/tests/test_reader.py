@@ -12,36 +12,7 @@ from bioio_czi import Reader
 
 from .conftest import LOCAL_RESOURCES_DIR
 
-
-@pytest.mark.parametrize(
-    ["filename", "num_subblocks", "acquistion_time"],
-    [
-        ("s_1_t_1_c_1_z_1.czi", 1, "2019-06-27T18:33:41.1154211Z"),
-        ("s_3_t_1_c_3_z_5.czi", 45, "2019-06-27T18:39:26.6459707Z"),
-        (
-            "variable_scene_shape_first_scene_pyramid.czi",
-            27,
-            "2019-05-09T09:49:17.9414649Z",
-        ),
-        pytest.param(
-            "s_1_t_1_c_1_z_1.ome.tiff",
-            None,
-            None,
-            marks=pytest.mark.xfail(raises=exceptions.UnsupportedFileFormatError),
-        ),
-    ],
-)
-def test_subblocks(filename: str, num_subblocks: int, acquistion_time: str) -> None:
-    reader = Reader(
-        LOCAL_RESOURCES_DIR / filename,
-        include_subblock_metadata=True,
-    )
-
-    subblocks = reader.metadata.findall("./Subblocks/Subblock")
-
-    assert len(subblocks) == num_subblocks
-    # Ensure one of the elements in the first subblock has expected data
-    assert subblocks[0].find(".//AcquisitionTime").text == acquistion_time
+# No subblock metadata available
 
 
 @pytest.mark.parametrize(
