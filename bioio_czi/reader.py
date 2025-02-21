@@ -2,31 +2,30 @@
 # -*- coding: utf-8 -*-
 
 import logging
-from pathlib import Path
-from typing import Any, ContextManager, Dict, List, Optional, Tuple, Union
+from typing import Any, ContextManager, Dict, List, Optional, Tuple
+from xml.etree import ElementTree
 
 import dask.array as da
 import numpy as np
 import xarray as xr
-from bioio_base import constants, exceptions
+from bioio_base import exceptions
 from bioio_base import io as io_utils
 from bioio_base import types
 from bioio_base.dimensions import (
-    DEFAULT_CHUNK_DIMS,
-    REQUIRED_CHUNK_DIMS,
+    DEFAULT_DIMENSION_ORDER_LIST,
     DimensionNames,
     Dimensions,
 )
 from bioio_base.reader import Reader as BaseReader
+from bioio_base.types import PhysicalPixelSizes
 from dask import delayed
-from fsspec.implementations.local import LocalFileSystem
 from fsspec.spec import AbstractFileSystem
-from lxml import etree
 from ome_types.model.ome import OME
 from pylibCZIrw import czi
 
 from . import ome as metadata_utils
-from .xml import xml_metadata
+
+Metadata = ElementTree.Element
 
 ###############################################################################
 
@@ -44,14 +43,29 @@ CZI_SCENE_DIM_CHAR = "S"
 PIXEL_DICT = {
     "gray8": np.uint8,
     "gray16": np.uint16,
-    # TODO handle other capitalized pixel types
-    "Gray16": np.uint16,
     "gray32": np.uint32,
     "gray32float": np.float32,
     "bgr24": np.uint8,
     "bgr48": np.uint16,
     "invalid": np.uint8,
 }
+
+
+def pixel_type_is_array(pixel_type: str) -> bool:
+    """
+    Is each pixel represented by multiple numbers (i.e., RGB)?
+
+    Parameters
+    ----------
+    pixel_type: str
+        The pixel type to check.
+
+    Returns
+    -------
+    is_array: bool
+        True if the pixel type is an array type.
+    """
+    return "bgr" in pixel_type
 
 
 ###############################################################################
@@ -66,15 +80,6 @@ class Reader(BaseReader):
     ----------
     image: types.PathLike
         Path to image file to construct Reader for.
-    chunk_dims: Union[str, List[str]]
-        Which dimensions to create chunks for.
-        Default: DEFAULT_CHUNK_DIMS
-        Note: DimensionNames.SpatialY, DimensionNames.SpatialX, and
-        DimensionNames.Samples, will always be added to the list if not present during
-        dask array construction.
-    include_subblock_metadata: bool
-        Whether to append metadata from the subblocks to the rest of the embedded
-        metadata.
     fs_kwargs: Dict[str, Any]
         Any specific keyword arguments to pass down to the fsspec created filesystem.
         Default: {}
@@ -83,7 +88,7 @@ class Reader(BaseReader):
     _xarray_dask_data: Optional["xr.DataArray"] = None
     _xarray_data: Optional["xr.DataArray"] = None
     _dims: Optional[Dimensions] = None
-    _metadata: Optional[etree._Element] = None
+    _metadata: Optional[Metadata] = None
     _scenes: Optional[Tuple[str, ...]] = None
     _current_scene_index: int = 0
     # Do not provide default value because
@@ -92,478 +97,92 @@ class Reader(BaseReader):
     _path: str
 
     @staticmethod
-    def _is_supported_image(fs: AbstractFileSystem, path: str, **kwargs: Any) -> bool:
+    def _is_supported_image(
+        fs: AbstractFileSystem,
+        path: str,
+        **kwargs: Any,
+    ) -> bool:
+        """
+        Check if file is a supported CZI by attempting to open it. This is a
+
+        Parameters
+        ----------
+        fs: AbstractFileSystem
+            The file system to used for reading.
+        path: str
+            The path to the file to read.
+        kwargs: Any
+            Any kwargs used for reading and validation of the file.
+
+        Returns
+        -------
+        supported: bool
+            Boolean value indicating if the file is supported by the reader.
+        """
         try:
-            if not isinstance(fs, LocalFileSystem):
-                raise ValueError(
-                    f"Cannot read CZIs from non-local file system. "
-                    f"Received URI: {path}, which points to {type(fs)}."
-                )
-
-            with czi.open_czi(path):
+            with open_czi_typed(path):
                 return True
-
         except RuntimeError:
             return False
 
-    def __init__(
-        self,
-        image: types.PathLike,
-        chunk_dims: Union[str, List[str]] = DEFAULT_CHUNK_DIMS,
-        include_subblock_metadata: bool = False,
-        fs_kwargs: Dict[str, Any] = {},
-    ):
-        # Expand details of provided image
+    def __init__(self, image: types.PathLike, fs_kwargs: Dict[str, Any] = {}) -> None:
         self._fs, self._path = io_utils.pathlike_to_fs(
-            image,
-            enforce_exists=True,
-            fs_kwargs=fs_kwargs,
+            image, enforce_exists=True, fs_kwargs=fs_kwargs
         )
 
-        # Catch non-local file system
-        if not isinstance(self._fs, LocalFileSystem):
-            raise ValueError(
-                f"Cannot read CZIs from non-local file system. "
-                f"Received URI: {self._path}, which points to {type(self._fs)}."
-            )
-
-        # Store params
-        if isinstance(chunk_dims, str):
-            chunk_dims = list(chunk_dims)
-
-        self.chunk_dims = chunk_dims
-
-        self._include_subblock_metadata = include_subblock_metadata
-
-        # Delayed storage
-        self._px_sizes: Optional[types.PhysicalPixelSizes] = None
-        self._mapped_dims: Optional[str] = None
-
-        # Enforce valid image
         if not self._is_supported_image(self._fs, self._path):
             raise exceptions.UnsupportedFileFormatError(
                 self.__class__.__name__, self._path
             )
 
     @property
-    def metadata(self) -> etree._Element:
-        if self._metadata is None:
-            with open_czi_typed(self._path) as file:
-                self._metadata = xml_metadata(file)
-        return self._metadata
-
-    @property
-    def mapped_dims(self) -> str:
-        if self._mapped_dims is None:
-            with open_czi_typed(self._path) as file:
-                # TODO clean up
-                self._mapped_dims = Reader._fix_czi_dims(
-                    "".join(list(file.total_bounding_box.keys()))
-                )
-
-        return self._mapped_dims
-
-    @staticmethod
-    def _fix_czi_dims(dims: str) -> str:
-        return (
-            dims.replace(CZI_BLOCK_DIM_CHAR, "")
-            .replace(CZI_SCENE_DIM_CHAR, "")
-            .replace(CZI_SAMPLES_DIM_CHAR, DimensionNames.Samples)
-        )
-
-    @property
     def scenes(self) -> Tuple[str, ...]:
-        """Note: scenes with no name (`None`) will be renamed to
-        "filename-<scene index>" to prevent ambiguity. Similarly, scenes with same
-        names are automatically appended with occurrence number to distinguish
-        between the two.
-
-        Returns:
-            Tuple[str, ...]: Scene names/id
         """
+        Returns
+        -------
+        scenes: Tuple[str, ...]
+            A tuple of valid scene ids in the file.
+
+        Notes
+        -----
+        Scene IDs are strings - not a range of integers.
+
+        When iterating over scenes please use:
+
+        >>> for id in image.scenes
+
+        and not:
+
+        >>> for i in range(len(image.scenes))
+        """
+
+        def scene_name(metadata: Metadata, scene_index: int) -> str:
+            scene_info = metadata.findall(
+                "./Metadata/Information/Image/Dimensions/"
+                f"S/Scenes/Scene[@Index='{scene_index}']"
+            )
+            if len(scene_info) != 1:
+                raise UnsupportedMetadataError(
+                    f"Expected 1 scene for index '{scene_index}' "
+                    "but found {len(scene_info)}."
+                )
+            scene_name = scene_info[0].attrib["Name"]
+            if type(scene_name) != str:
+                # Fall back to index if name is raw bytes
+                return str(scene_index)
+            return scene_name
+
         if self._scenes is None:
             with open_czi_typed(self._path) as file:
-                xpath_str = "./Metadata/Information/Image/Dimensions/S/Scenes/Scene"
-                meta_scenes = xml_metadata(file).findall(xpath_str)
-                scene_names: List[str] = []
-
-                # mapping of scene name to occurrences, indicating duplication.
-                scene_name_frequency = {}
-                for scene_idx, meta_scene in enumerate(meta_scenes):
-                    shape = meta_scene.find("Shape")
-                    if shape is not None:
-                        shape_name = shape.get("Name")
-                        scene_name = meta_scene.get("Name")
-                        combined_scene_name = f"{scene_name}-{shape_name}"
-                    else:
-                        optional_combined_scene_name = meta_scene.get("Name")
-                        # Some scene names can be unpopulated, for those we should fill
-                        # with filename-idx
-                        if optional_combined_scene_name is None:
-                            fname_prefix = Path(self._path).stem
-                            combined_scene_name = f"{fname_prefix}-{scene_idx}"
-                        else:
-                            combined_scene_name = optional_combined_scene_name
-                        # Check for duplicated names
-                        # first encounter with a duplicate modify original scene name
-                        # to reflect its new duplicate status
-                        if combined_scene_name not in scene_name_frequency:
-                            scene_name_frequency[combined_scene_name] = [scene_idx, 1]
-                        else:
-                            if scene_name_frequency[combined_scene_name][1] == 1:
-                                scene_names[
-                                    scene_name_frequency[combined_scene_name][0]
-                                ] += "-1"
-
-                            scene_name_frequency[combined_scene_name][1] += 1
-
-                            combined_scene_name += (
-                                f"-{scene_name_frequency[combined_scene_name][1]}"
-                            )
-
-                    scene_names.append(combined_scene_name)
-
-                # If the scene is implicit just assign it name Scene:0
-                if len(scene_names) < 1:
-                    scene_names = [metadata_utils.generate_ome_image_id(0)]
-                else:
-                    # reconcile scene list against the dims shape
-                    # dims_shape = file.get_dims_shape()
-                    dims_shape = file.total_bounding_box
-                    if len(scene_names) != len(
-                        dims_shape
-                    ):  # TODO and file.shape_is_consistent:
-                        dims_shape_dict = dims_shape[0]
-                        scene_range = dims_shape_dict.get(CZI_SCENE_DIM_CHAR)
-                        if scene_range is not None:
-                            scene_names = scene_names[scene_range[0] : scene_range[1]]
-                        else:
-                            # If this is the root node of a split multiscene czi,
-                            # then the scene_range could be None because the dims_shape
-                            # will be effectively empty.
-                            # We do not currently support loading multi-file split
-                            # scene CZI files
-                            log.warning(
-                                "CZI file appears to contain multiple scenes but "
-                                "dimension data is not available in this file. "
-                                "Root node of split multi-scene CZI files are not "
-                                "supported by Reader."
-                            )
-
-                self._scenes = tuple(scene_names)
+                # Underlying scene IDs are ints
+                scene_ids = file.scenes_bounding_rectangle.keys()
+                self._scenes = tuple(scene_name(self.metadata, i) for i in scene_ids)
 
         return self._scenes
 
     @staticmethod
-    def _dims_shape_to_scene_dims_shape(
-        dims_shape: List[Dict], scene_index: int, consistent: bool
-    ) -> Dict[str, Tuple[int, int]]:
-        """
-        This function takes the output of `get_dims_shape()` and returns a
-        dictionary of dimensions for the selected scene
-
-        Parameters
-        ----------
-        dims_shape: List[Dict]
-            a list of dictionaries, generated by `get_dims_shape()`
-        scene_index: int
-            the index of the scene being used
-        consistent: bool
-            true if the dictionaries are consistent could be represented
-            compactly (dims_shape with length 1)
-
-        Returns
-        -------
-        A dictionary of dimensions, ie
-        {"T": (0, 1), "C": (0, 3), "Y": (0, 256), "X":(0, 256)}.
-        """
-        dims_shape_index = 0 if consistent else scene_index
-        dims_shape_dict = dims_shape[dims_shape_index]
-        dims_shape_dict.pop(CZI_SCENE_DIM_CHAR, None)
-        return dims_shape_dict
-
-    @staticmethod
-    def _adjust_scene_index(
-        dims_shape: List[Dict], scene_index: int, consistent: bool
-    ) -> int:
-        """
-        This function modifies a scene index to be an offset into the true scene
-        indices reported by the czi file
-
-        Parameters
-        ----------
-        dims_shape: List[Dict]
-            a list of dictionaries, generated by `get_dims_shape()`
-        scene_index: int
-            the index of the scene being used
-        consistent: bool
-            true if the dictionaries are consistent could be represented
-            compactly (dims_shape with length 1)
-
-        Returns
-        -------
-        An int representing the scene index to use in a true libCZI dimension
-        """
-        dims_shape_index = 0 if consistent else scene_index
-        dims_shape_dict = dims_shape[dims_shape_index]
-        scene_range = dims_shape_dict.get(CZI_SCENE_DIM_CHAR)
-        if scene_range is None:
-            return scene_index
-        if not consistent:
-            # we have selected a dims_shape_dict already based on scene index
-            # let's make sure the scene index is in the S range
-            if scene_index < scene_range[0] or scene_index >= scene_range[1]:
-                raise ValueError(
-                    f"Scene index {scene_index} is not in the range "
-                    f"{scene_range[0]} to {scene_range[1]}"
-                )
-            return scene_index
-        return scene_range[0] + scene_index
-
-    @staticmethod
-    def _read_chunk_from_image(
-        fs: AbstractFileSystem,
-        path: str,
-        scene: int,
-        read_dims: Optional[Dict[str, int]] = None,
-    ) -> np.ndarray:
-        return Reader._get_image_data(
-            fs=fs, path=path, scene=scene, read_dims=read_dims
-        )[0]
-
-    @staticmethod
-    def _get_image_data(
-        fs: AbstractFileSystem,
-        path: str,
-        scene: int,
-        read_dims: Optional[Dict[str, int]] = None,
-    ) -> Tuple[np.ndarray, List[Tuple[str, int]]]:
-        """
-        Read and return the squeezed image data requested along with the dimension info
-        that was read.
-
-        Parameters
-        ----------
-        fs: AbstractFileSystem
-            The file system to use for reading.
-        path: str
-            The path to the file to read.
-        scene: int
-            The scene index to pull the chunk from.
-        read_dims: Optional[Dict[str, int]]
-            The dimensions to read from the file as a dictionary of string to integer.
-            Default: None (Read all data from the image)
-
-        Returns
-        -------
-        chunk: np.ndarray
-            The image chunk read as a numpy array.
-        read_dimensions: List[Tuple[str, int]]]
-            The dimension sizes that were returned from the read.
-        """
-        # Catch optional read dim
-        if read_dims is None:
-            read_dims = {}
-
-        # Init czi
-        with open_czi_typed(path) as file:
-            # Get current scene read dims
-            adjusted_scene_index = Reader._adjust_scene_index(
-                file.total_bounding_box, scene, False  # TODO file.shape_is_consistent
-            )
-            read_dims[CZI_SCENE_DIM_CHAR] = adjusted_scene_index
-
-            # Read image
-            data, dims = czi.read_image(**read_dims)
-
-            # Drop dims that shouldn't be provided back
-            ops: List[Union[int, slice]] = []
-            real_dims = []
-            for dim_info in dims:
-                # Expand dimension info
-                dim, _ = dim_info
-
-                # If the dim was provided in the read dims
-                # we know a single plane for that dimension was requested so remove it
-                if dim in read_dims or dim == CZI_BLOCK_DIM_CHAR:
-                    ops.append(0)
-
-                # Otherwise just read the full slice
-                else:
-                    ops.append(slice(None, None, None))
-                    real_dims.append(dim_info)
-
-            # Convert ops and run getitem
-            return data[tuple(ops)], real_dims
-
-    def _create_dask_array(self, file: czi.CziReader) -> xr.DataArray:
-        """
-        Creates a delayed dask array for the file.
-
-        Parameters
-        ----------
-        czi: CziFile
-            An open CziFile for processing.
-
-        Returns
-        -------
-        image_data: da.Array
-            The fully constructed and fully delayed image as a Dask Array object.
-        """
-        # Always add the plane dimensions if not present already
-        for dim in REQUIRED_CHUNK_DIMS:
-            if dim not in self.chunk_dims:
-                self.chunk_dims.append(dim)
-
-        # Safety measure / "feature"
-        self.chunk_dims = [d.upper() for d in self.chunk_dims]
-
-        # Construct the delayed dask array
-        # TODO ok so maybe we can use total_bounding_box instead which says
-        # "The plane dimensions are constant across scenes."? Gotta figure
-        # out if we actually need the scene bounding box
-        dims_shape = file.total_bounding_box
-        # Reader._dims_shape_to_scene_dims_shape(
-        #     file.total_bounding_box(),  # TODO this no longer includes 'S' (scene)
-        #     scene_index=self.current_scene_index,
-        #     consistent=file.shape_is_consistent,  # TODO not defined
-        # )
-
-        # Remove block dim as not useful
-        dims_shape.pop(CZI_BLOCK_DIM_CHAR, None)
-
-        # TODO name this variable clearly
-        dims_set = set(dims_shape.keys())
-        # TODO why are these removed?
-        dims_set = dims_set.difference({CZI_BLOCK_DIM_CHAR, CZI_SCENE_DIM_CHAR})
-
-        # Get the shape for the chunk and operating shape for the dask array
-        # We also collect the chunk and non chunk dimension ordering so that we can
-        # swap the dimensions after we
-        # block the dask array together.
-        sample_chunk_shape = []
-        operating_shape = []
-        non_chunk_dimension_ordering = []
-        chunk_dimension_ordering = []
-        for dim in dims_set:
-            # Unpack dim info
-            _, dim_size = dims_shape[dim]
-
-            # If the dim is part of the specified chunk dims then append it to the
-            # sample, and, append the dimension
-            # to the chunk dimension ordering
-            if dim in self.chunk_dims:
-                sample_chunk_shape.append(dim_size)
-                chunk_dimension_ordering.append(dim)
-
-            # Otherwise, append the dimension to the non chunk dimension ordering, and,
-            # append the true size of the
-            # image at that dimension
-            else:
-                non_chunk_dimension_ordering.append(dim)
-                operating_shape.append(dim_size)
-
-        # Convert shapes to tuples and combine the non and chunked dimension orders as
-        # that is the order the data will
-        # actually come out of the read data as
-        sample_chunk_shape_tuple = tuple(sample_chunk_shape)
-        blocked_dimension_order = (
-            non_chunk_dimension_ordering + chunk_dimension_ordering
-        )
-
-        # Fill out the rest of the operating shape with dimension sizes of 1 to match
-        # the length of the sample chunk
-        # When dask.block happens it fills the dimensions from inner-most to outer-most
-        # with the chunks as long as the dimension is size 1
-        # Basically, we are adding empty dimensions to the operating shape that will be
-        # filled by the chunks from dask
-        operating_shape_tuple = tuple(operating_shape) + (1,) * len(
-            sample_chunk_shape_tuple
-        )
-
-        # Create empty numpy array with the operating shape so that we can iter through
-        # and use the multi_index to create the readers.
-        lazy_arrays: np.ndarray = np.ndarray(operating_shape_tuple, dtype=object)
-
-        # We can enumerate over the multi-indexed array and construct read_dims
-        # dictionaries by simply zipping together the ordered dims list and the current
-        # multi-index plus the begin index for that plane. We then set the value of the
-        # array at the same multi-index to the delayed reader using the constructed
-        # read_dims dictionary.
-        dims = list(dims_set)
-        begin_indicies = tuple(dims_shape[d][0] for d in dims)
-        for np_index, _ in np.ndenumerate(lazy_arrays):
-            # Add the czi file begin index for each dimension to the array dimension
-            # index
-            this_chunk_read_indicies = (
-                current_dim_begin_index + curr_dim_index
-                for current_dim_begin_index, curr_dim_index in zip(
-                    begin_indicies, np_index
-                )
-            )
-
-            # Zip the dims with the read indices
-            this_chunk_read_dims = dict(
-                zip(blocked_dimension_order, this_chunk_read_indicies)
-            )
-
-            # Remove the dimensions that we want to chunk by from the read dims
-            for d in self.chunk_dims:
-                this_chunk_read_dims.pop(d, None)
-
-            # Get pixel type and catch unsupported
-            # TODO handle case where multiple pixel types are used
-            # TODO name this variable better
-            pixel_type_given = list(file.pixel_types.values())[0]
-            pixel_type = PIXEL_DICT.get(pixel_type_given)
-            if pixel_type is None:
-                raise TypeError(f"Pixel type: {pixel_type_given} is not supported.")
-
-            # Add delayed array to lazy arrays at index
-            lazy_arrays[np_index] = da.from_delayed(
-                delayed(Reader._read_chunk_from_image)(
-                    fs=self._fs,
-                    path=self._path,
-                    scene=self.current_scene_index,
-                    read_dims=this_chunk_read_dims,
-                ),
-                shape=sample_chunk_shape,
-                dtype=pixel_type,
-            )
-
-        # Convert the numpy array of lazy readers into a dask array and fill the inner
-        # most empty dimensions with chunks
-        merged = da.block(lazy_arrays.tolist())
-
-        # Because we have set certain dimensions to be chunked and others not
-        # we will need to transpose back to original dimension ordering
-        # Example being, if the original dimension ordering was "SZYX" and we want to
-        # chunk by "S", "Y", and "X" we created an array with dimensions ordering "ZSYX"
-        # TODO bring this back
-        # transpose_indices = []
-        # transpose_required = False
-        # for i, d in enumerate(dims_str):
-        #     new_index = blocked_dimension_order.index(d)
-        #     if new_index != i:
-        #         transpose_required = True
-        #         transpose_indices.append(new_index)
-        #     else:
-        #         transpose_indices.append(i)
-
-        # Only run if the transpose is actually required
-        # The default case is "Z", "Y", "X", which _usually_ doesn't need to be
-        # transposed because that is _usually_ the normal dimension order of the CZI
-        # file anyway
-        # if transpose_required:
-        #     merged = da.transpose(merged, tuple(transpose_indices))
-
-        # Because dimensions outside of Y and X can be in any order and present or not
-        # we also return the dimension order string.
-        return merged
-
-    @staticmethod
     def _get_coords_and_physical_px_sizes(
-        xml: etree._Element, scene_index: int, dims_shape: Dict[str, Any]
+        xml: Metadata, scene_index: int, dims_shape: Dict[str, Any]
     ) -> Tuple[Dict[str, Any], types.PhysicalPixelSizes]:
         # Create coord dict
         coords: Dict[str, Any] = {}
@@ -661,121 +280,404 @@ class Reader(BaseReader):
 
     def _read_delayed(self) -> xr.DataArray:
         """
-        Construct the delayed xarray DataArray object for the image.
+        The delayed data array constructor for the image.
 
         Returns
         -------
-        image: xr.DataArray
-            The fully constructed and fully delayed image as a DataArray object.
-            Metadata is attached in some cases as coords, dims, and attrs.
+        data: xr.DataArray
+            The fully constructed delayed DataArray.
 
-        Raises
-        ------
-        exceptions.UnsupportedFileFormatError
-            The file could not be read or is not supported.
+            It is additionally recommended to closely monitor how dask array chunks are
+            managed.
+
+        Notes
+        -----
+        Requirements for the returned xr.DataArray:
+        * Must have the `dims` populated.
+        * If a channel dimension is present, please populate the channel dimensions
+        coordinate array the respective channel coordinate values.
         """
-        with open_czi_typed(self._path) as file:
-            dims_shape = file.total_bounding_box
-            # dims_shape = Reader._dims_shape_to_scene_dims_shape(
-            #     dims_shape=file.get_dims_shape(),
-            #     scene_index=self.current_scene_index,
-            #     consistent=file.shape_is_consistent,
-            # )
 
-            # Get image data
-            image_data = self._create_dask_array(file)
-
-            # Create coordinate planes
-            meta = xml_metadata(file)
-            coords, px_sizes = self._get_coords_and_physical_px_sizes(
-                xml=meta,
-                scene_index=self.current_scene_index,
-                dims_shape=dims_shape,
+        def dim_indices(
+            total_bounding_box: Dict[str, Tuple[int, int]], dim: str
+        ) -> np.ndarray:
+            """
+            Example
+            -------
+            >>> dim_indices({
+            ...   'X': (0, 100),
+            ...   'Y': (0, 100)
+            ... }, 'X') = np.array([0, 1, 2, ..., 99])
+            """
+            # TODO
+            return (
+                np.arange(total_bounding_box[dim][0], total_bounding_box[dim][1])
+                * 4.57436261
             )
 
-            # Append subblock metadata to the other metadata if param is True
-            # TODO do we need this??
-            # if self._include_subblock_metadata:
-            #    subblocks = file.read_subblock_metadata(unified_xml=True)
-            #    meta.append(subblocks)
+        def get_ordered_dims(
+            total_bounding_box: Dict[str, Tuple[int, int]]
+        ) -> List[str]:
+            """
+            Get the dimentions from the file in the default dimension order (TCZYX).
 
-            # Store pixel sizes
-            self._px_sizes = px_sizes
+            Example
+            -------
+            >>> get_ordered_dims({
+            ...   'X': (0, 100),
+            ...   'Y': (0, 100),
+            ...   'R': (0, 2)
+            ... }) = ['R', 'Y', 'X']
+            """
+            available_dims = set(total_bounding_box.keys())
+            available_default_dims = [
+                d for d in DEFAULT_DIMENSION_ORDER_LIST if d in available_dims
+            ]
+            nondefault_dims = [
+                d for d in available_dims if d not in DEFAULT_DIMENSION_ORDER_LIST
+            ]
+            ordered_dims = nondefault_dims + available_default_dims
+            # TODO rewrite
+            ordered_dims = [
+                d
+                for d in ordered_dims
+                if total_bounding_box[d][1] - total_bounding_box[d][0] > 1
+            ]
+            # pylibCZIrw reads YX slices. Confirm that Y and X are the last two
+            # dimensions.
+            assert ordered_dims[-2:] == [
+                DimensionNames.SpatialY,
+                DimensionNames.SpatialX,
+            ]
+            return ordered_dims
 
-            # handle edge case where image has 0,0 YX dims:
-            if image_data.shape[-2:] == (0, 0):
-                return xr.DataArray(
-                    dims=coords.keys(),
-                    coords=coords,
-                    attrs={constants.METADATA_UNPROCESSED: meta},
-                )
-            else:
-                return xr.DataArray(
-                    image_data,
-                    dims=list(self.mapped_dims),
-                    coords=coords,
-                    attrs={constants.METADATA_UNPROCESSED: meta},
-                )
+        total_bounding_box = None
+        pixel_types = None
+        scenes_bounding_rectangle = None
+        with open_czi_typed(self._path) as file:
+            total_bounding_box = file.total_bounding_box
+            pixel_types = file.pixel_types
+            scenes_bounding_rectangle = file.scenes_bounding_rectangle
+
+        ordered_dims = get_ordered_dims(total_bounding_box)
+        # E.g., non_yx_dims = ['T', 'C', 'Z']
+        non_yx_dims = ordered_dims[:-2]
+
+        # coords = { d: dim_indices(total_bounding_box, d) for d in non_yx_dims}
+        # TODO cleanup
+        coords, _ = self._get_coords_and_physical_px_sizes(
+            self.metadata, self._current_scene_index, total_bounding_box
+        )
+        assert (
+            self._current_resolution_level in scenes_bounding_rectangle
+        ), f"Expected {self._current_resolution_level} in {scenes_bounding_rectangle}."
+        rect = scenes_bounding_rectangle[self._current_scene_index]
+        coords.update(
+            {
+                DimensionNames.SpatialY: np.arange(rect.y, rect.y + rect.h)
+                * 4.57436261,
+                DimensionNames.SpatialX: np.arange(rect.x, rect.x + rect.w)
+                * 4.57436261,
+            }
+        )
+
+        # E.g., shape = (30, 2, 20, 100, 100)
+        shape = tuple(len(coords[d]) for d in ordered_dims)
+        print("shape", shape)
+        # E.g., shape_without_yx = (30, 2, 20)
+        shape_without_yx = shape[:-2]
+        print("shape_without_yx", shape_without_yx)
+
+        def array_builder(indices: tuple[int]) -> int:
+            """
+            Example
+            -------
+            >>> file: czi.CziReader
+            >>> non_yx_dims = ['T', 'C', 'Z']
+            >>> indices = [0, 1, 2]
+            >>> array_builder(0, 1, 2) = file.read(
+            ...   scene=0,
+            ...   plane={'T': 0, 'C': 1, 'Z': 2}
+            ... )
+            """
+            assert len(indices) >= len(
+                non_yx_dims
+            ), f"Expected {len(indices)} >= {len(non_yx_dims)}."
+            plane = {d: indices[i] for i, d in enumerate(non_yx_dims)}
+            with open_czi_typed(self._path) as file:
+                result = file.read(scene=self._current_scene_index, plane=plane)
+                # result.shape is (Y, X, 1) or (Y, X, 3) depending on whether it's RGB
+                # or grayscale.
+                return np.squeeze(result)
+                if pixel_type_is_array(pixel_types[0]):
+                    raise NotImplementedError(
+                        f"RGB not supported. Pixel type: {pixel_types[0]}"
+                    )
+                    return result
+                else:
+                    return np.squeeze(result, axis=-1)
+
+        # The Y and X shape of lazy_arrrays are both 1 because we are making each YX
+        # slice a single chunk.
+        # E.g., lazy_arrays.shape = (30, 2, 20, 1, 1)
+        lazy_arrays: np.ndarray = np.ndarray(shape_without_yx + (1, 1), dtype=object)
+        for np_index, _ in np.ndenumerate(lazy_arrays):
+            lazy_arrays[np_index] = da.from_delayed(
+                delayed(array_builder)(np_index),
+                shape[-2:],  # TODO add (3,) if it's RGB
+                dtype=PIXEL_DICT[pixel_types[0].lower()],
+            )
+        merged = da.block(lazy_arrays.tolist())
+        print("merged.shape", merged.shape)
+
+        return xr.DataArray(
+            data=merged,
+            dims=ordered_dims,
+            coords=coords,
+        )
 
     def _read_immediate(self) -> xr.DataArray:
         """
-        Construct the in-memory xarray DataArray object for the image.
+        The immediate data array constructor for the image.
 
         Returns
         -------
-        image: xr.DataArray
-            The fully constructed and fully read into memory image as a DataArray
-            object. Metadata is attached in some cases as coords, dims, and attrs.
+        data: xr.DataArray
+            The fully read data array.
+
+        Notes
+        -----
+        Requirements for the returned xr.DataArray:
+        * Must have the `dims` populated.
+        * If a channel dimension is present, please populate the channel dimensions
+        coordinate array the respective channel coordinate values.
+        """
+        return self._read_delayed().compute()
+
+    def _get_stitched_dask_mosaic(self) -> xr.DataArray:
+        """
+        Stitch all mosaic tiles back together and return as a single xr.DataArray with
+        a delayed dask array for backing data.
+
+        Returns
+        -------
+        mosaic: xr.DataArray
+            The fully stitched together image. Contains all the dimensions of the image
+            with the YX expanded to the full mosaic.
 
         Raises
         ------
-        exceptions.UnsupportedFileFormatError
-            The file could not be read or is not supported.
+        NotImplementedError
+            Reader or format doesn't support reconstructing mosaic tiles.
+
+        Notes
+        -----
+        Implementers can determine how to chunk the array.
+        Most common is to chunk by tile.
         """
-        with open_czi_typed(self._path) as file:
-            dims_shape = file.total_bounding_box
-            # dims_shape = Reader._dims_shape_to_scene_dims_shape(
-            #     dims_shape=file.get_dims_shape(),
-            #     scene_index=self.current_scene_index,
-            #     consistent=file.shape_is_consistent,
-            # )
+        raise NotImplementedError(
+            "This reader does not support reconstructing mosaic images."
+        )
 
-            # Get image data
-            image_data, _ = self._get_image_data(
-                fs=self._fs,
-                path=self._path,
-                scene=self.current_scene_index,
-            )
+    def _get_stitched_mosaic(self) -> xr.DataArray:
+        """
+        Stitch all mosaic tiles back together and return as a single xr.DataArray with
+        an in-memory numpy array for backing data.
 
-            # Get metadata
-            meta = xml_metadata(file)
+        Returns
+        -------
+        mosaic: np.ndarray
+            The fully stitched together image. Contains all the dimensions of the image
+            with the YX expanded to the full mosaic.
 
-            # Create coordinate planes
-            coords, px_sizes = self._get_coords_and_physical_px_sizes(
-                xml=meta,
-                scene_index=self.current_scene_index,
-                dims_shape=dims_shape,
-            )
-
-            # Store pixel sizes
-            self._px_sizes = px_sizes
-
-            return xr.DataArray(
-                image_data,
-                dims=[d for d in self.mapped_dims],
-                coords=coords,
-                attrs={constants.METADATA_UNPROCESSED: meta},
-            )
-
-    @property
-    def ome_metadata(self) -> OME:
-        return metadata_utils.transform_metadata_with_xslt(
-            self.metadata,
-            Path(__file__).parent / "czi-to-ome-xslt/xslt/czi-to-ome.xsl",
+        Raises
+        ------
+        NotImplementedError
+            Reader or format doesn't support reconstructing mosaic tiles.
+        """
+        raise NotImplementedError(
+            "This reader does not support reconstructing mosaic images."
         )
 
     @property
-    def physical_pixel_sizes(self) -> types.PhysicalPixelSizes:
+    def xarray_dask_data(self) -> xr.DataArray:
+        """
+        Returns
+        -------
+        xarray_dask_data: xr.DataArray
+            The delayed image and metadata as an annotated data array.
+        """
+        if self._xarray_dask_data is None:
+            self._xarray_dask_data = self._read_delayed()
+
+        return self._xarray_dask_data
+
+    @property
+    def xarray_data(self) -> xr.DataArray:
+        """
+        Returns
+        -------
+        xarray_data: xr.DataArray
+            The fully read image and metadata as an annotated data array.
+        """
+        if self._xarray_data is None:
+            self._xarray_data = self._read_immediate()
+
+            # Remake the delayed xarray dataarray object using a rechunked dask array
+            # from the just retrieved in-memory xarray dataarray
+            self._xarray_dask_data = xr.DataArray(
+                self._xarray_data.data,
+                dims=self._xarray_data.dims,
+                coords=self._xarray_data.coords,
+                attrs=self._xarray_data.attrs,
+            )
+
+        return self._xarray_data
+
+    @property
+    def dask_data(self) -> da.Array:
+        """
+        Returns
+        -------
+        dask_data: da.Array
+            The image as a dask array with the native dimension ordering.
+        """
+        return self.xarray_dask_data.data
+
+    @property
+    def data(self) -> np.ndarray:
+        """
+        Returns
+        -------
+        data: np.ndarray
+            The image as a numpy array with native dimension ordering.
+        """
+        return self.xarray_data.data
+
+    @property
+    def mosaic_xarray_dask_data(self) -> xr.DataArray:
+        """
+        TODO Update comments on all the mosaic_ methods or just raise errors
+        Returns
+        -------
+        xarray_dask_data: xr.DataArray
+            The delayed mosaic image and metadata as an annotated data array.
+
+        Raises
+        ------
+        InvalidDimensionOrderingError
+            No MosaicTile dimension available to reader.
+
+        Notes
+        -----
+        Each reader can implement mosaic tile stitching differently but it is common
+        that each tile is a dask array chunk.
+        """
+        return self.xarray_dask_data
+
+    @property
+    def mosaic_xarray_data(self) -> xr.DataArray:
+        """
+        Returns
+        -------
+        xarray_dask_data: xr.DataArray
+            The in-memory mosaic image and metadata as an annotated data array.
+
+        Raises
+        ------
+        InvalidDimensionOrderingError
+            No MosaicTile dimension available to reader.
+
+        Notes
+        -----
+        Very large images should use `mosaic_xarray_dask_data` to avoid seg-faults.
+        """
+        return self.xarray_data
+
+    @property
+    def mosaic_dask_data(self) -> da.Array:
+        """
+        Returns
+        -------
+        dask_data: da.Array
+            The stitched together mosaic image as a dask array.
+
+        Raises
+        ------
+        InvalidDimensionOrderingError
+            No MosaicTile dimension available to reader.
+
+        Notes
+        -----
+        Each reader can implement mosaic tile stitching differently but it is common
+        that each tile is a dask array chunk.
+        """
+        return self.xarray_dask_data.data
+
+    @property
+    def mosaic_data(self) -> np.ndarray:
+        """
+        Returns
+        -------
+        data: np.ndarray
+            The stitched together mosaic image as a numpy array.
+
+        Raises
+        ------
+        InvalidDimensionOrderingError
+            No MosaicTile dimension available to reader.
+
+        Notes
+        -----
+        Very large images should use `mosaic_dask_data` to avoid seg-faults.
+        """
+        return self.mosaic_xarray_data.data
+
+    @property
+    def metadata(self) -> Metadata:
+        """
+        Returns
+        -------
+        metadata: Any
+            The metadata for the formats supported by the inhereting Reader.
+
+            If the inheriting Reader supports processing the metadata into a more useful
+            format / Python object, this will return the result.
+
+            For both the unprocessed and processed metadata from the file, use
+            `xarray_dask_data.attrs` which will contain a dictionary with keys:
+            `unprocessed` and `processed` that you can then select.
+        """
+        if self._metadata is None:
+            with open_czi_typed(self._path) as file:
+                """
+                Caution: The xml.etree.ElementTree module is not
+                secure against maliciously constructed data. If you need
+                to parse untrusted or unauthenticated data see XML vulnerabilities.
+                TODO highlight this better? aicspylibczi does the same thing though
+                """
+                self._metadata = ElementTree.fromstring(file.raw_metadata)
+        return self._metadata
+
+    @property
+    def ome_metadata(self) -> OME:
+        """
+        Returns
+        -------
+        metadata: OME
+            The original metadata transformed into the OME specfication.
+            This likely isn't a complete transformation but is guarenteed to
+            be a valid transformation.
+
+        Raises
+        ------
+        NotImplementedError
+            No metadata transformer available.
+        """
+        raise NotImplementedError()
+
+    @property
+    def physical_pixel_sizes(self) -> PhysicalPixelSizes:
         """
         Returns
         -------
@@ -788,18 +690,48 @@ class Reader(BaseReader):
         We currently do not handle unit attachment to these values. Please see the file
         metadata for unit information.
         """
-        if self._px_sizes is None:
-            # We get pixel sizes as a part of array construct
-            # so simply run array construct
-            self.dask_data
 
-        if self._px_sizes is None:
-            raise ValueError("Pixel sizes weren't created as a part of image reading")
+        def physical_pixel_size(
+            metadata: Metadata, dimension: str, allow_none: bool = False
+        ) -> float | None:
+            scales = metadata.findall(
+                f"./Metadata/Scaling/Items/Distance[@Id='{dimension}']"
+            )
 
-        return self._px_sizes
+            if len(scales) != 1:
+                if allow_none and len(scales) == 0:
+                    return None
+                raise UnsupportedMetadataError(
+                    f"Expected 1 distance scale for dimension '{dimension}' but found "
+                    f"{len(scales)}."
+                )
 
-    # TODO maybe implement _get_stitched_dask_mosaic since we have
-    # dropped support for getting individual tiles?
+            unparsed_scale = scales[0].find("./Value")
+            if unparsed_scale is None or unparsed_scale.text is None:
+                raise UnsupportedMetadataError(
+                    f"Could not find any distance scale for dimension '{dimension}'."
+                )
+            scale_m = float(unparsed_scale.text)
+            # The values are stored in units of meters always in .czi. Convert to
+            # microns.
+            return scale_m / 1e-6
+
+        return PhysicalPixelSizes(
+            Z=physical_pixel_size(self.metadata, "Z", allow_none=True),
+            Y=physical_pixel_size(self.metadata, "Y"),
+            X=physical_pixel_size(self.metadata, "X"),
+        )
+
+    @property
+    def mosaic_tile_dims(self) -> None:
+        """
+        Returns
+        -------
+        tile_dims: None
+            Inherited method. Mosaic tiles are not supported by the underlying
+            pylibCZIrw.
+        """
+        return None
 
 
 def open_czi_typed(
@@ -812,3 +744,9 @@ def open_czi_typed(
     is a czi.CziReader
     """
     return czi.open_czi(filepath, file_input_type, cache_options)
+
+
+class UnsupportedMetadataError(Exception):
+    """
+    The reader encountered metadata it doesn't know how to handle.
+    """
