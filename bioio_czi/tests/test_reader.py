@@ -173,19 +173,17 @@ def test_czi_reader_remote_xfail() -> None:
 
 
 @pytest.mark.parametrize(
-    "filename, expected_tile_y_coords, expected_tile_x_coords",
+    "filename, expected_y_coords, expected_x_coords",
     [
         (
             "OverViewScan.czi",
-            np.arange(0, 2012.719549253996, 4.5743626119409),
-            np.arange(0, 2488.45326089585, 4.5743626119409),
+            np.arange(0, 14692.852709554172, 4.5743626119409),
+            np.arange(0, 33836.560240526844, 4.5743626119409),
         ),
     ],
 )
-def test_czi_reader_coords(
-    filename: str,
-    expected_tile_y_coords: np.ndarray,
-    expected_tile_x_coords: np.ndarray,
+def test_czi_reader_mosaic_coords(
+    filename: str, expected_y_coords: np.ndarray, expected_x_coords: np.ndarray
 ) -> None:
     # Construct full filepath
     uri = LOCAL_RESOURCES_DIR / filename
@@ -193,12 +191,26 @@ def test_czi_reader_coords(
     # Construct reader
     reader = Reader(uri)
 
-    # Check tile y and x min max
+    # Different from bioio-czi reader: the size of xarray_dask_data is the size of
+    # a bounding box around all tiles in the scene, not just a single tile. (at the
+    # lowest pyramid level (highest resolution)).
+    # (at the lowest pyramid level (highest resolution)
     np.testing.assert_array_equal(
         reader.xarray_dask_data.coords[dimensions.DimensionNames.SpatialY].data,
-        expected_tile_y_coords,
+        expected_y_coords,
     )
     np.testing.assert_array_equal(
         reader.xarray_dask_data.coords[dimensions.DimensionNames.SpatialX].data,
-        expected_tile_x_coords,
+        expected_x_coords,
+    )
+
+    # Same as bioio-czi reader: mosaic dimensions are the full size of the lowest
+    # pyramid level (highest resolution).
+    np.testing.assert_array_equal(
+        reader.mosaic_xarray_dask_data.coords[dimensions.DimensionNames.SpatialY].data,
+        expected_y_coords,
+    )
+    np.testing.assert_array_equal(
+        reader.mosaic_xarray_dask_data.coords[dimensions.DimensionNames.SpatialX].data,
+        expected_x_coords,
     )

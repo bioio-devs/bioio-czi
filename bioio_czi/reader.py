@@ -8,7 +8,7 @@ from xml.etree import ElementTree
 import dask.array as da
 import numpy as np
 import xarray as xr
-from bioio_base import exceptions
+from bioio_base import constants, exceptions
 from bioio_base import io as io_utils
 from bioio_base import types
 from bioio_base.dimensions import (
@@ -330,8 +330,15 @@ class Reader(BaseReader):
             ... }) = ['R', 'Y', 'X']
             """
             available_dims = set(total_bounding_box.keys())
+            required_dims = {
+                DimensionNames.Channel,
+                DimensionNames.SpatialX,
+                DimensionNames.SpatialY,
+            }
             available_default_dims = [
-                d for d in DEFAULT_DIMENSION_ORDER_LIST if d in available_dims
+                d
+                for d in DEFAULT_DIMENSION_ORDER_LIST
+                if d in available_dims | required_dims
             ]
             nondefault_dims = [
                 d for d in available_dims if d not in DEFAULT_DIMENSION_ORDER_LIST
@@ -341,7 +348,8 @@ class Reader(BaseReader):
             ordered_dims = [
                 d
                 for d in ordered_dims
-                if total_bounding_box[d][1] - total_bounding_box[d][0] > 1
+                if d in required_dims
+                or total_bounding_box[d][1] - total_bounding_box[d][0] > 1
             ]
             # pylibCZIrw reads YX slices. Confirm that Y and X are the last two
             # dimensions.
@@ -355,9 +363,9 @@ class Reader(BaseReader):
         pixel_types = None
         scenes_bounding_rectangle = None
         with open_czi_typed(self._path) as file:
-            total_bounding_box = file.total_bounding_box
+            total_bounding_box = file.total_bounding_box_no_pyramid
             pixel_types = file.pixel_types
-            scenes_bounding_rectangle = file.scenes_bounding_rectangle
+            scenes_bounding_rectangle = file.scenes_bounding_rectangle_no_pyramid
 
         ordered_dims = get_ordered_dims(total_bounding_box)
         # E.g., non_yx_dims = ['T', 'C', 'Z']
@@ -369,8 +377,8 @@ class Reader(BaseReader):
             self.metadata, self._current_scene_index, total_bounding_box
         )
         assert (
-            self._current_resolution_level in scenes_bounding_rectangle
-        ), f"Expected {self._current_resolution_level} in {scenes_bounding_rectangle}."
+            self._current_scene_index in scenes_bounding_rectangle
+        ), f"Expected {self._current_scene_index} in {scenes_bounding_rectangle}."
         rect = scenes_bounding_rectangle[self._current_scene_index]
         coords.update(
             {
@@ -429,11 +437,14 @@ class Reader(BaseReader):
             )
         merged = da.block(lazy_arrays.tolist())
         print("merged.shape", merged.shape)
+        print("dims", ordered_dims)
+        print("coords", coords)
 
         return xr.DataArray(
             data=merged,
             dims=ordered_dims,
             coords=coords,
+            attrs={constants.METADATA_UNPROCESSED: self.metadata},
         )
 
     def _read_immediate(self) -> xr.DataArray:
