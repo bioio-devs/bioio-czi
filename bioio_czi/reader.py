@@ -365,7 +365,7 @@ class Reader(BaseReader):
 
         # coords = { d: dim_indices(total_bounding_box, d) for d in non_yx_dims}
         # TODO cleanup
-        coords, _ = self._get_coords_and_physical_px_sizes(
+        coords, pixel_sizes = self._get_coords_and_physical_px_sizes(
             self.metadata, self._current_scene_index, total_bounding_box
         )
         assert (
@@ -375,9 +375,9 @@ class Reader(BaseReader):
         coords.update(
             {
                 DimensionNames.SpatialY: np.arange(rect.y, rect.y + rect.h)
-                * 4.57436261,
+                * pixel_sizes.Y,
                 DimensionNames.SpatialX: np.arange(rect.x, rect.x + rect.w)
-                * 4.57436261,
+                * pixel_sizes.X,
             }
         )
 
