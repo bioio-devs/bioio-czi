@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import logging
-from typing import Any, ContextManager, Dict, List, Optional, Tuple
+from typing import Any, ContextManager, Dict, Optional, Tuple
 from xml.etree import ElementTree
 
 import dask.array as da
@@ -41,32 +41,15 @@ CZI_SCENE_DIM_CHAR = "S"
 ###############################################################################
 
 PIXEL_DICT = {
-    "gray8": np.uint8,
-    "gray16": np.uint16,
-    "gray32": np.uint32,
-    "gray32float": np.float32,
-    "bgr24": np.uint8,
-    "bgr48": np.uint16,
+    "Gray8": np.uint8,
+    "Gray16": np.uint16,
+    "Gray32": np.uint32,  # Not supported by underlying pylibCZIrw
+    "Gray32Float": np.float32,
+    "Bgr24": np.uint8,
+    "Bgr48": np.uint16,
+    "Bgr96Float": np.float32,  # Supported by pylibCZIrw but not tested in this plugin
     "invalid": np.uint8,
 }
-
-
-def pixel_type_is_array(pixel_type: str) -> bool:
-    """
-    Is each pixel represented by multiple numbers (i.e., RGB)?
-
-    Parameters
-    ----------
-    pixel_type: str
-        The pixel type to check.
-
-    Returns
-    -------
-    is_array: bool
-        True if the pixel type is an array type.
-    """
-    return "bgr" in pixel_type
-
 
 ###############################################################################
 
@@ -177,6 +160,8 @@ class Reader(BaseReader):
                 # Underlying scene IDs are ints
                 scene_ids = file.scenes_bounding_rectangle.keys()
                 self._scenes = tuple(scene_name(self.metadata, i) for i in scene_ids)
+                if len(self._scenes) < 1:
+                    self._scenes = (metadata_utils.generate_ome_image_id(0),)
 
         return self._scenes
 
@@ -297,68 +282,6 @@ class Reader(BaseReader):
         * If a channel dimension is present, please populate the channel dimensions
         coordinate array the respective channel coordinate values.
         """
-
-        def dim_indices(
-            total_bounding_box: Dict[str, Tuple[int, int]], dim: str
-        ) -> np.ndarray:
-            """
-            Example
-            -------
-            >>> dim_indices({
-            ...   'X': (0, 100),
-            ...   'Y': (0, 100)
-            ... }, 'X') = np.array([0, 1, 2, ..., 99])
-            """
-            # TODO
-            return (
-                np.arange(total_bounding_box[dim][0], total_bounding_box[dim][1])
-                * 4.57436261
-            )
-
-        def get_ordered_dims(
-            total_bounding_box: Dict[str, Tuple[int, int]]
-        ) -> List[str]:
-            """
-            Get the dimentions from the file in the default dimension order (TCZYX).
-
-            Example
-            -------
-            >>> get_ordered_dims({
-            ...   'X': (0, 100),
-            ...   'Y': (0, 100),
-            ...   'R': (0, 2)
-            ... }) = ['R', 'Y', 'X']
-            """
-            available_dims = set(total_bounding_box.keys())
-            required_dims = {
-                DimensionNames.Channel,
-                DimensionNames.SpatialX,
-                DimensionNames.SpatialY,
-            }
-            available_default_dims = [
-                d
-                for d in DEFAULT_DIMENSION_ORDER_LIST
-                if d in available_dims | required_dims
-            ]
-            nondefault_dims = [
-                d for d in available_dims if d not in DEFAULT_DIMENSION_ORDER_LIST
-            ]
-            ordered_dims = nondefault_dims + available_default_dims
-            # TODO rewrite
-            ordered_dims = [
-                d
-                for d in ordered_dims
-                if d in required_dims
-                or total_bounding_box[d][1] - total_bounding_box[d][0] > 1
-            ]
-            # pylibCZIrw reads YX slices. Confirm that Y and X are the last two
-            # dimensions.
-            assert ordered_dims[-2:] == [
-                DimensionNames.SpatialY,
-                DimensionNames.SpatialX,
-            ]
-            return ordered_dims
-
         total_bounding_box = None
         pixel_types = None
         scenes_bounding_rectangle = None
@@ -367,27 +290,48 @@ class Reader(BaseReader):
             pixel_types = file.pixel_types
             scenes_bounding_rectangle = file.scenes_bounding_rectangle_no_pyramid
 
-        ordered_dims = get_ordered_dims(total_bounding_box)
-        # E.g., non_yx_dims = ['T', 'C', 'Z']
-        non_yx_dims = ordered_dims[:-2]
-
-        # coords = { d: dim_indices(total_bounding_box, d) for d in non_yx_dims}
-        # TODO cleanup
         coords, pixel_sizes = self._get_coords_and_physical_px_sizes(
             self.metadata, self._current_scene_index, total_bounding_box
         )
-        assert (
-            self._current_scene_index in scenes_bounding_rectangle
-        ), f"Expected {self._current_scene_index} in {scenes_bounding_rectangle}."
-        rect = scenes_bounding_rectangle[self._current_scene_index]
+        if len(scenes_bounding_rectangle) > 0:
+            assert (
+                self._current_scene_index in scenes_bounding_rectangle
+            ), f"Expected {self._current_scene_index} in {scenes_bounding_rectangle}."
+            rect = scenes_bounding_rectangle[self._current_scene_index]
+            startx, endx = rect.x, rect.x + rect.w
+            starty, endy = rect.y, rect.y + rect.h
+        else:
+            startx = total_bounding_box[DimensionNames.SpatialX][0]
+            endx = total_bounding_box[DimensionNames.SpatialX][1]
+            starty = total_bounding_box[DimensionNames.SpatialY][0]
+            endy = total_bounding_box[DimensionNames.SpatialY][1]
+        # TODO do  this in _get_coords_and_physical_px_sizes instead
         coords.update(
             {
-                DimensionNames.SpatialY: np.arange(rect.y, rect.y + rect.h)
-                * pixel_sizes.Y,
-                DimensionNames.SpatialX: np.arange(rect.x, rect.x + rect.w)
-                * pixel_sizes.X,
+                DimensionNames.SpatialY: np.arange(starty, endy) * pixel_sizes.Y,
+                DimensionNames.SpatialX: np.arange(startx, endx) * pixel_sizes.X,
             }
         )
+        # TODO figure out why RGB-8bit.czi test expects a T dimension
+        # xpath_str = "./Metadata/Information/Image/Dimensions/T"
+        # time_info = self.metadata.findall(xpath_str)
+        # if len(time_info) > 0:
+        #     # Possible feature: parse the start time and time increment and use them
+        #     # to make the time coordinates. What units to use?
+        #     coords.update({
+        #         DimensionNames.Time: np.arange(
+        #             total_bounding_box[DimensionNames.Time][0],
+        #             total_bounding_box[DimensionNames.Time][1]
+        #         )
+        #     })
+
+        ordered_dims = [d for d in DEFAULT_DIMENSION_ORDER_LIST if d in coords]
+        assert ordered_dims[-2:] == [
+            DimensionNames.SpatialY,
+            DimensionNames.SpatialX,
+        ]
+        # E.g., non_yx_dims = ['T', 'C', 'Z']
+        non_yx_dims = ordered_dims[:-2]
 
         # E.g., shape = (30, 2, 20, 100, 100)
         shape = tuple(len(coords[d]) for d in ordered_dims)
@@ -413,36 +357,41 @@ class Reader(BaseReader):
             ), f"Expected {len(indices)} >= {len(non_yx_dims)}."
             plane = {d: indices[i] for i, d in enumerate(non_yx_dims)}
             with open_czi_typed(self._path) as file:
-                result = file.read(scene=self._current_scene_index, plane=plane)
+                scene: int | None = self._current_scene_index
+                if len(file.scenes_bounding_rectangle_no_pyramid) == 0:
+                    # Some files have no scenes but can still be read if scene is not
+                    # specified.
+                    scene = None
+                result = file.read(scene=scene, plane=plane)
                 # result.shape is (Y, X, 1) or (Y, X, 3) depending on whether it's RGB
                 # or grayscale.
                 return np.squeeze(result)
-                if pixel_type_is_array(pixel_types[0]):
-                    raise NotImplementedError(
-                        f"RGB not supported. Pixel type: {pixel_types[0]}"
-                    )
-                    return result
-                else:
-                    return np.squeeze(result, axis=-1)
 
         # The Y and X shape of lazy_arrrays are both 1 because we are making each YX
         # slice a single chunk.
         # E.g., lazy_arrays.shape = (30, 2, 20, 1, 1)
         lazy_arrays: np.ndarray = np.ndarray(shape_without_yx + (1, 1), dtype=object)
+        chunk_shape = shape[-2:]
+        mapped_dims = list(coords.keys())
+        if "Bgr" in pixel_types[0]:
+            # If the image is BGR, each chunk has shape (X, Y, 3)
+            chunk_shape += (3,)
+            mapped_dims.append(DimensionNames.Samples)
         for np_index, _ in np.ndenumerate(lazy_arrays):
             lazy_arrays[np_index] = da.from_delayed(
                 delayed(array_builder)(np_index),
-                shape[-2:],  # TODO add (3,) if it's RGB
-                dtype=PIXEL_DICT[pixel_types[0].lower()],
+                chunk_shape,
+                dtype=PIXEL_DICT[pixel_types[0]],
             )
         merged = da.block(lazy_arrays.tolist())
         print("merged.shape", merged.shape)
         print("dims", ordered_dims)
-        print("coords", coords)
+        print("coords.keys()", coords.keys())
+        print("mapped_dims", mapped_dims)
 
         return xr.DataArray(
             data=merged,
-            dims=ordered_dims,
+            dims=mapped_dims,
             coords=coords,
             attrs={constants.METADATA_UNPROCESSED: self.metadata},
         )
