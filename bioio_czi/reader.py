@@ -343,6 +343,7 @@ class Reader(BaseReader):
             assert len(indices) >= len(
                 non_yx_dims
             ), f"Expected {len(indices)} >= {len(non_yx_dims)}."
+            # E.g., plane = {'T': 0, 'C': 1, 'Z': 2}
             plane = {d: indices[i] for i, d in enumerate(non_yx_dims)}
             with open_czi_typed(self._path) as file:
                 scene: int | None = self._current_scene_index
@@ -350,7 +351,10 @@ class Reader(BaseReader):
                     # Some files have no scenes but can still be read if scene is not
                     # specified.
                     scene = None
-                result = file.read(scene=scene, plane=plane)
+                    roi = None
+                else:
+                    roi = scenes_bounding_rectangle[scene]
+                result = file.read(scene=scene, plane=plane, roi=roi)
                 # result.shape is (Y, X, 1) or (Y, X, 3) depending on whether it's RGB
                 # or grayscale.
                 return np.squeeze(result)
