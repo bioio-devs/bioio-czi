@@ -312,18 +312,6 @@ class Reader(BaseReader):
                 DimensionNames.SpatialX: np.arange(startx, endx) * pixel_sizes.X,
             }
         )
-        # TODO figure out why RGB-8bit.czi test expects a T dimension
-        # xpath_str = "./Metadata/Information/Image/Dimensions/T"
-        # time_info = self.metadata.findall(xpath_str)
-        # if len(time_info) > 0:
-        #     # Possible feature: parse the start time and time increment and use them
-        #     # to make the time coordinates. What units to use?
-        #     coords.update({
-        #         DimensionNames.Time: np.arange(
-        #             total_bounding_box[DimensionNames.Time][0],
-        #             total_bounding_box[DimensionNames.Time][1]
-        #         )
-        #     })
 
         ordered_dims = [d for d in DEFAULT_DIMENSION_ORDER_LIST if d in coords]
         assert ordered_dims[-2:] == [
