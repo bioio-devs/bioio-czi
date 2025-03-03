@@ -448,61 +448,6 @@ class Reader(BaseReader):
         )
 
     @property
-    def xarray_dask_data(self) -> xr.DataArray:
-        """
-        Returns
-        -------
-        xarray_dask_data: xr.DataArray
-            The delayed image and metadata as an annotated data array.
-        """
-        if self._xarray_dask_data is None:
-            self._xarray_dask_data = self._read_delayed()
-
-        return self._xarray_dask_data
-
-    @property
-    def xarray_data(self) -> xr.DataArray:
-        """
-        Returns
-        -------
-        xarray_data: xr.DataArray
-            The fully read image and metadata as an annotated data array.
-        """
-        if self._xarray_data is None:
-            self._xarray_data = self._read_immediate()
-
-            # Remake the delayed xarray dataarray object using a rechunked dask array
-            # from the just retrieved in-memory xarray dataarray
-            self._xarray_dask_data = xr.DataArray(
-                self._xarray_data.data,
-                dims=self._xarray_data.dims,
-                coords=self._xarray_data.coords,
-                attrs=self._xarray_data.attrs,
-            )
-
-        return self._xarray_data
-
-    @property
-    def dask_data(self) -> da.Array:
-        """
-        Returns
-        -------
-        dask_data: da.Array
-            The image as a dask array with the native dimension ordering.
-        """
-        return self.xarray_dask_data.data
-
-    @property
-    def data(self) -> np.ndarray:
-        """
-        Returns
-        -------
-        data: np.ndarray
-            The image as a numpy array with native dimension ordering.
-        """
-        return self.xarray_data.data
-
-    @property
     def mosaic_xarray_dask_data(self) -> xr.DataArray:
         """
         TODO Update comments on all the mosaic_ methods or just raise errors
