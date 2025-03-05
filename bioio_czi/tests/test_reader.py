@@ -29,7 +29,7 @@ from .conftest import LOCAL_RESOURCES_DIR
             "S=2_4x2_T=2=Z=3_CH=2.czi",
             "TR1",
             ("TR1", "TR2"),
-            (2, 2, 3, 256, 256),
+            (2, 2, 3, 487, 947),
             np.uint16,
             "TCZYX",
             ["DAPI", "EGFP"],

@@ -313,7 +313,15 @@ class Reader(BaseReader):
             }
         )
 
-        ordered_dims = [d for d in DEFAULT_DIMENSION_ORDER_LIST if d in coords]
+        ordered_dims = [
+            d
+            for d in DEFAULT_DIMENSION_ORDER_LIST
+            if (
+                d in total_bounding_box
+                and total_bounding_box[d][1] - total_bounding_box[d][0] > 1
+            )
+            or d in coords
+        ]
         assert ordered_dims[-2:] == [
             DimensionNames.SpatialY,
             DimensionNames.SpatialX,
@@ -322,11 +330,14 @@ class Reader(BaseReader):
         non_yx_dims = ordered_dims[:-2]
 
         # E.g., shape = (30, 2, 20, 100, 100)
-        shape = tuple(len(coords[d]) for d in ordered_dims)
-        print("shape", shape)
+        shape = tuple(
+            len(coords[d])
+            if d in coords
+            else total_bounding_box[d][1] - total_bounding_box[d][0]
+            for d in ordered_dims
+        )
         # E.g., shape_without_yx = (30, 2, 20)
         shape_without_yx = shape[:-2]
-        print("shape_without_yx", shape_without_yx)
 
         def array_builder(indices: tuple[int]) -> int:
             """
@@ -364,7 +375,7 @@ class Reader(BaseReader):
         # E.g., lazy_arrays.shape = (30, 2, 20, 1, 1)
         lazy_arrays: np.ndarray = np.ndarray(shape_without_yx + (1, 1), dtype=object)
         chunk_shape = shape[-2:]
-        mapped_dims = list(coords.keys())
+        mapped_dims = ordered_dims
         if "Bgr" in pixel_types[0]:
             # If the image is BGR, each chunk has shape (X, Y, 3)
             chunk_shape += (3,)
@@ -376,10 +387,6 @@ class Reader(BaseReader):
                 dtype=PIXEL_DICT[pixel_types[0]],
             )
         merged = da.block(lazy_arrays.tolist())
-        print("merged.shape", merged.shape)
-        print("dims", ordered_dims)
-        print("coords.keys()", coords.keys())
-        print("mapped_dims", mapped_dims)
 
         return xr.DataArray(
             data=merged,
