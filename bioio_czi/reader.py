@@ -300,19 +300,19 @@ class Reader(BaseReader):
             dims_shape[DimensionNames.SpatialY] = (rect.y, rect.y + rect.h)
         coords = self._get_coords(self.metadata, self._current_scene_index, dims_shape)
 
-        def dim_is_useful(dim: str, bounding_box: Dict[str, Tuple[int, int]]) -> bool:
+        def size(dim: str, bounding_box: Dict[str, Tuple[int, int]]) -> int:
             """
-            Check if there is more than one possible value for the dimension.
+            Return the size of the dimension if it is in the bounding box, otherwise -1.
             """
             if dim not in bounding_box:
-                return False
+                return -1
             bounds = bounding_box[dim]
-            return bounds[1] - bounds[0] > 1
+            return bounds[1] - bounds[0]
 
         ordered_dims = [
             d
             for d in DEFAULT_DIMENSION_ORDER_LIST
-            if d in coords or dim_is_useful(d, total_bounding_box)
+            if d in coords or size(d, total_bounding_box) > 1
         ]
         assert ordered_dims[-2:] == [DimensionNames.SpatialY, DimensionNames.SpatialX]
         # E.g., non_yx_dims = ['T', 'C', 'Z']
@@ -320,9 +320,7 @@ class Reader(BaseReader):
 
         # E.g., shape = (30, 2, 20, 100, 100)
         shape = tuple(
-            len(coords[d])
-            if d in coords
-            else total_bounding_box[d][1] - total_bounding_box[d][0]
+            len(coords[d]) if d in coords else size(d, total_bounding_box)
             for d in ordered_dims
         )
         # E.g., shape_without_yx = (30, 2, 20)
