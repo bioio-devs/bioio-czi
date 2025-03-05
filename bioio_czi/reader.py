@@ -419,127 +419,55 @@ class Reader(BaseReader):
 
     def _get_stitched_dask_mosaic(self) -> xr.DataArray:
         """
-        Stitch all mosaic tiles back together and return as a single xr.DataArray with
-        a delayed dask array for backing data.
+        This reader always stiches the entire image together, as the underlying
+        pylibczirw does not support reading individual tiles.
 
         Returns
         -------
         mosaic: xr.DataArray
             The fully stitched together image. Contains all the dimensions of the image
             with the YX expanded to the full mosaic.
-
-        Raises
-        ------
-        NotImplementedError
-            Reader or format doesn't support reconstructing mosaic tiles.
-
-        Notes
-        -----
-        Implementers can determine how to chunk the array.
-        Most common is to chunk by tile.
         """
-        raise NotImplementedError(
-            "This reader does not support reconstructing mosaic images."
-        )
+        return self.data
 
     def _get_stitched_mosaic(self) -> xr.DataArray:
         """
-        Stitch all mosaic tiles back together and return as a single xr.DataArray with
-        an in-memory numpy array for backing data.
+        This reader always stiches the entire image together, as the underlying
+        pylibczirw does not support reading individual tiles.
 
         Returns
         -------
         mosaic: np.ndarray
             The fully stitched together image. Contains all the dimensions of the image
             with the YX expanded to the full mosaic.
-
-        Raises
-        ------
-        NotImplementedError
-            Reader or format doesn't support reconstructing mosaic tiles.
         """
-        raise NotImplementedError(
-            "This reader does not support reconstructing mosaic images."
-        )
+        return self.dask_data
 
     @property
     def mosaic_xarray_dask_data(self) -> xr.DataArray:
         """
-        TODO Update comments on all the mosaic_ methods or just raise errors
+        This reader always stiches the entire image together, as the underlying
+        pylibczirw does not support reading individual tiles.
+
         Returns
         -------
         xarray_dask_data: xr.DataArray
-            The delayed mosaic image and metadata as an annotated data array.
-
-        Raises
-        ------
-        InvalidDimensionOrderingError
-            No MosaicTile dimension available to reader.
-
-        Notes
-        -----
-        Each reader can implement mosaic tile stitching differently but it is common
-        that each tile is a dask array chunk.
+            The delayed stiched mosaic image and metadata as an annotated data array.
         """
         return self.xarray_dask_data
 
     @property
     def mosaic_xarray_data(self) -> xr.DataArray:
         """
+        This reader always stiches the entire image together, as the underlying
+        pylibczirw does not support reading individual tiles.
+
         Returns
         -------
         xarray_dask_data: xr.DataArray
-            The in-memory mosaic image and metadata as an annotated data array.
-
-        Raises
-        ------
-        InvalidDimensionOrderingError
-            No MosaicTile dimension available to reader.
-
-        Notes
-        -----
-        Very large images should use `mosaic_xarray_dask_data` to avoid seg-faults.
+            The in-memory stitched mosaic image and metadata as an annotated data array.
         """
         return self.xarray_data
-
-    @property
-    def mosaic_dask_data(self) -> da.Array:
-        """
-        Returns
-        -------
-        dask_data: da.Array
-            The stitched together mosaic image as a dask array.
-
-        Raises
-        ------
-        InvalidDimensionOrderingError
-            No MosaicTile dimension available to reader.
-
-        Notes
-        -----
-        Each reader can implement mosaic tile stitching differently but it is common
-        that each tile is a dask array chunk.
-        """
-        return self.xarray_dask_data.data
-
-    @property
-    def mosaic_data(self) -> np.ndarray:
-        """
-        Returns
-        -------
-        data: np.ndarray
-            The stitched together mosaic image as a numpy array.
-
-        Raises
-        ------
-        InvalidDimensionOrderingError
-            No MosaicTile dimension available to reader.
-
-        Notes
-        -----
-        Very large images should use `mosaic_dask_data` to avoid seg-faults.
-        """
-        return self.mosaic_xarray_data.data
 
     @property
     def metadata(self) -> Metadata:
