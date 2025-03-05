@@ -166,11 +166,18 @@ class Reader(BaseReader):
         return self._scenes
 
     @staticmethod
-    def _get_coords_and_physical_px_sizes(
+    def _get_coords(
         xml: Metadata, scene_index: int, dims_shape: Dict[str, Any]
-    ) -> Tuple[Dict[str, Any], types.PhysicalPixelSizes]:
-        # Create coord dict
-        coords: Dict[str, Any] = {}
+    ) -> Dict[str, list]:
+        """
+        Generate coordinate arrays for channel dimension ("C") and spatial dimensions
+        ("X", "Y", and "Z") based on channel names and physical pixel sizes.
+
+        Time coordinates are not handled here.
+        Hypothetically, we could get the interval between time points from the metadata
+        and generate a time coordinate array.
+        """
+        coords: Dict[str, list] = {}
 
         # Get all images
         img_sets = xml.findall(".//Image/Dimensions/Channels")
@@ -254,14 +261,7 @@ class Reader(BaseReader):
                 dim_size = dims_shape[dim_name][1] - dims_shape[dim_name][0]
                 coords[dim_name] = Reader._generate_coord_array(0, dim_size, scale)
 
-        # Time
-        # TODO: unpack "TimeSpan" elements
-        # I can find a single "TimeSpan" in our data but unsure how multi-scene handles
-
-        # Create physical pixel sizes
-        px_sizes = types.PhysicalPixelSizes(scale_z, scale_y, scale_x)
-
-        return coords, px_sizes
+        return coords
 
     def _read_delayed(self) -> xr.DataArray:
         """
@@ -290,28 +290,15 @@ class Reader(BaseReader):
             pixel_types = file.pixel_types
             scenes_bounding_rectangle = file.scenes_bounding_rectangle_no_pyramid
 
-        coords, pixel_sizes = self._get_coords_and_physical_px_sizes(
-            self.metadata, self._current_scene_index, total_bounding_box
-        )
+        dims_shape = total_bounding_box
         if len(scenes_bounding_rectangle) > 0:
             assert (
                 self._current_scene_index in scenes_bounding_rectangle
             ), f"Expected {self._current_scene_index} in {scenes_bounding_rectangle}."
             rect = scenes_bounding_rectangle[self._current_scene_index]
-            startx, endx = rect.x, rect.x + rect.w
-            starty, endy = rect.y, rect.y + rect.h
-        else:
-            startx = total_bounding_box[DimensionNames.SpatialX][0]
-            endx = total_bounding_box[DimensionNames.SpatialX][1]
-            starty = total_bounding_box[DimensionNames.SpatialY][0]
-            endy = total_bounding_box[DimensionNames.SpatialY][1]
-        # TODO do  this in _get_coords_and_physical_px_sizes instead
-        coords.update(
-            {
-                DimensionNames.SpatialY: np.arange(starty, endy) * pixel_sizes.Y,
-                DimensionNames.SpatialX: np.arange(startx, endx) * pixel_sizes.X,
-            }
-        )
+            dims_shape[DimensionNames.SpatialX] = (rect.x, rect.x + rect.w)
+            dims_shape[DimensionNames.SpatialY] = (rect.y, rect.y + rect.h)
+        coords = self._get_coords(self.metadata, self._current_scene_index, dims_shape)
 
         ordered_dims = [
             d
@@ -322,10 +309,7 @@ class Reader(BaseReader):
             )
             or d in coords
         ]
-        assert ordered_dims[-2:] == [
-            DimensionNames.SpatialY,
-            DimensionNames.SpatialX,
-        ]
+        assert ordered_dims[-2:] == [DimensionNames.SpatialY, DimensionNames.SpatialX]
         # E.g., non_yx_dims = ['T', 'C', 'Z']
         non_yx_dims = ordered_dims[:-2]
 
