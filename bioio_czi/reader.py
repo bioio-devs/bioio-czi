@@ -364,6 +364,23 @@ class Reader(BaseReader):
                     scene = None
                     roi = None
                 else:
+                    # The purpose of this next line is complicated.
+                    # ROI stands for Region Of Interest.
+                    #
+                    # In pylibczi's read method, the default ROI is the bounding
+                    # rectangle of the scene **across all zoom levels**. We are going to
+                    # read just the highest resolution level (zoom = 1), which is
+                    # smaller than the default ROI in some cases. For example,
+                    # scene 0 of the test file S=2_4x2_T=2=Z=3_CH=2.czi is 947x487 when
+                    # looking at only the highest resolution, but is 948x488 when
+                    # all zoom levels are considered. (I believe this is because at zoom
+                    # 0.5, the result is ceiling(947/2) x ceiling(487/2).)
+                    #
+                    # See also: file.scenes_bounding_rectangle vs.
+                    # file.scenes_bounding_rectangle_no_pyramid.
+                    #
+                    # Therefore, when calling read, we crop to just the ROI of the
+                    # highest resolution level.
                     roi = scenes_bounding_rectangle[scene]
                 result = file.read(scene=scene, plane=plane, roi=roi)
                 # result.shape is (Y, X, 1) or (Y, X, 3) depending on whether it's RGB
