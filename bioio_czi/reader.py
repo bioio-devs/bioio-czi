@@ -300,14 +300,19 @@ class Reader(BaseReader):
             dims_shape[DimensionNames.SpatialY] = (rect.y, rect.y + rect.h)
         coords = self._get_coords(self.metadata, self._current_scene_index, dims_shape)
 
+        def dim_is_useful(dim: str, bounding_box: Dict[str, Tuple[int, int]]) -> bool:
+            """
+            Check if there is more than one possible value for the dimension.
+            """
+            if dim not in bounding_box:
+                return False
+            bounds = bounding_box[dim]
+            return bounds[1] - bounds[0] > 1
+
         ordered_dims = [
             d
             for d in DEFAULT_DIMENSION_ORDER_LIST
-            if (
-                d in total_bounding_box
-                and total_bounding_box[d][1] - total_bounding_box[d][0] > 1
-            )
-            or d in coords
+            if d in coords or dim_is_useful(d, total_bounding_box)
         ]
         assert ordered_dims[-2:] == [DimensionNames.SpatialY, DimensionNames.SpatialX]
         # E.g., non_yx_dims = ['T', 'C', 'Z']
