@@ -25,20 +25,13 @@ from pylibCZIrw import czi
 
 from . import ome as metadata_utils
 
+###############################################################################
+
 Metadata = ElementTree.Element
 # Example bounding box: {'X': (0, 100), 'Y': (0, 100), 'Z': (0, 20)}
 BoundingBox = Dict[str, Tuple[int, int]]
 
-###############################################################################
-
 log = logging.getLogger(__name__)
-
-###############################################################################
-
-CZI_SAMPLES_DIM_CHAR = "A"
-CZI_BLOCK_DIM_CHAR = "B"
-CZI_SCENE_DIM_CHAR = "S"
-
 
 ###############################################################################
 
@@ -76,8 +69,6 @@ class Reader(BaseReader):
     _metadata: Optional[Metadata] = None
     _scenes: Optional[Tuple[str, ...]] = None
     _current_scene_index: int = 0
-    # Do not provide default value because
-    # they may not need to be used by your reader (i.e. input param is an array)
     _fs: "AbstractFileSystem"
     _path: str
 
@@ -163,6 +154,7 @@ class Reader(BaseReader):
                 scene_ids = file.scenes_bounding_rectangle.keys()
                 self._scenes = tuple(scene_name(self.metadata, i) for i in scene_ids)
                 if len(self._scenes) < 1:
+                    # If there are no scenes, use the default scene ID
                     self._scenes = (metadata_utils.generate_ome_image_id(0),)
 
         return self._scenes
@@ -212,37 +204,31 @@ class Reader(BaseReader):
         * If a channel dimension is present, please populate the channel dimensions
         coordinate array the respective channel coordinate values.
         """
-        total_bounding_box = None
-        pixel_types = None
-        scenes_bounding_rectangle = None
+        total_bounding_box: BoundingBox
+        pixel_types: Dict[int, str]
+        scenes_bounding_rectangle: Dict[int, czi.Rectangle]
         with open_czi_typed(self._path) as file:
             total_bounding_box = file.total_bounding_box_no_pyramid
             pixel_types = file.pixel_types
             scenes_bounding_rectangle = file.scenes_bounding_rectangle_no_pyramid
 
-        dims_shape = total_bounding_box
+        # Combine the dimension bounds from total_bounding_box and
+        # scenes_bounding_rectangle
+        dim_bounds = total_bounding_box
         if len(scenes_bounding_rectangle) > 0:
             assert (
                 self._current_scene_index in scenes_bounding_rectangle
             ), f"Expected {self._current_scene_index} in {scenes_bounding_rectangle}."
             rect = scenes_bounding_rectangle[self._current_scene_index]
-            dims_shape[DimensionNames.SpatialX] = (rect.x, rect.x + rect.w)
-            dims_shape[DimensionNames.SpatialY] = (rect.y, rect.y + rect.h)
-        coords = self._get_coords(self.metadata, self._current_scene_index, dims_shape)
+            dim_bounds[DimensionNames.SpatialX] = (rect.x, rect.x + rect.w)
+            dim_bounds[DimensionNames.SpatialY] = (rect.y, rect.y + rect.h)
+        coords = self._get_coords(self.metadata, self._current_scene_index, dim_bounds)
 
-        def size(dim: str, bounding_box: Dict[str, Tuple[int, int]]) -> int:
-            """
-            Return the size of the dimension if it is in the bounding box, otherwise -1.
-            """
-            if dim not in bounding_box:
-                return -1
-            bounds = bounding_box[dim]
-            return bounds[1] - bounds[0]
-
+        # Put the available dimensions in the default order
         ordered_dims = [
             d
             for d in DEFAULT_DIMENSION_ORDER_LIST
-            if d in coords or size(d, total_bounding_box) > 1
+            if d in coords or size(total_bounding_box, d) > 1
         ]
         assert ordered_dims[-2:] == [DimensionNames.SpatialY, DimensionNames.SpatialX]
         # E.g., non_yx_dims = ['T', 'C', 'Z']
@@ -250,7 +236,7 @@ class Reader(BaseReader):
 
         # E.g., shape = (30, 2, 20, 100, 100)
         shape = tuple(
-            len(coords[d]) if d in coords else size(d, total_bounding_box)
+            len(coords[d]) if d in coords else size(total_bounding_box, d)
             for d in ordered_dims
         )
         # E.g., shape_without_yx = (30, 2, 20)
@@ -258,6 +244,8 @@ class Reader(BaseReader):
 
         def array_builder(indices: tuple[int]) -> int:
             """
+            Internal helper method to get one chunk of the image data.
+
             Example
             -------
             >>> file: czi.CziReader
@@ -274,7 +262,7 @@ class Reader(BaseReader):
             # E.g., plane = {'T': 0, 'C': 1, 'Z': 2}
             plane = {d: indices[i] for i, d in enumerate(non_yx_dims)}
             with open_czi_typed(self._path) as file:
-                scene: int | None = self._current_scene_index
+                scene: int | None
                 if len(file.scenes_bounding_rectangle_no_pyramid) == 0:
                     # Some files have no scenes but can still be read if scene is not
                     # specified.
@@ -298,6 +286,7 @@ class Reader(BaseReader):
                     #
                     # Therefore, when calling read, we crop to just the ROI of the
                     # highest resolution level.
+                    scene = self._current_scene_index
                     roi = scenes_bounding_rectangle[scene]
                 result = file.read(scene=scene, plane=plane, roi=roi)
                 # result.shape is (Y, X, 1) or (Y, X, 3) depending on whether it's RGB
@@ -580,7 +569,7 @@ def get_channel_names(
     return scene_channel_list
 
 
-def size(bounding_box: Dict[str, Tuple[int, int]], dim: str) -> int:
+def size(bounding_box: BoundingBox, dim: str) -> int:
     """
     Return the size of the dimension if it is in the bounding box, otherwise -1.
     """
