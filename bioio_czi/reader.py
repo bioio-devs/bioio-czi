@@ -358,7 +358,7 @@ class Reader(BaseReader):
             The fully stitched together image. Contains all the dimensions of the image
             with the YX expanded to the full mosaic.
         """
-        return self.data
+        return self.xarray_dask_data
 
     def _get_stitched_mosaic(self) -> xr.DataArray:
         """
@@ -371,7 +371,7 @@ class Reader(BaseReader):
             The fully stitched together image. Contains all the dimensions of the image
             with the YX expanded to the full mosaic.
         """
-        return self.dask_data
+        return self.xarray_data
 
     @property
     def mosaic_xarray_dask_data(self) -> xr.DataArray:
