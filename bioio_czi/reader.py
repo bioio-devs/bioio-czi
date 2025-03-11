@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import logging
+from pathlib import Path
 from typing import Any, ContextManager, Dict, Optional, Tuple
 from xml.etree import ElementTree
 
@@ -422,13 +423,13 @@ class Reader(BaseReader):
             The original metadata transformed into the OME specfication.
             This likely isn't a complete transformation but is guarenteed to
             be a valid transformation.
-
-        Raises
-        ------
-        NotImplementedError
-            No metadata transformer available.
         """
-        raise NotImplementedError()
+        # This method is identical to the implementation for the aicspylibczi-based
+        # reader.
+        return metadata_utils.transform_metadata_with_xslt(
+            self.metadata,
+            Path(__file__).parent / "czi-to-ome-xslt/xslt/czi-to-ome.xsl",
+        )
 
     @property
     def physical_pixel_sizes(self) -> PhysicalPixelSizes:
