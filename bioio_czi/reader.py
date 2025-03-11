@@ -179,7 +179,6 @@ class Reader(BaseReader):
         # Handle Spatial Dimensions
         for dim_name, scale in self.physical_pixel_sizes._asdict().items():
             if scale is not None and dim_name in dims_shape:
-                # TODO DRY with size
                 dim_size = size(dims_shape, dim_name)
                 coords[dim_name] = Reader._generate_coord_array(0, dim_size, scale)
 
@@ -402,15 +401,15 @@ class Reader(BaseReader):
             For both the unprocessed and processed metadata from the file, use
             `xarray_dask_data.attrs` which will contain a dictionary with keys:
             `unprocessed` and `processed` that you can then select.
+
+        Caution
+        -------
+        This method uses the xml.etree.ElementTree.fromstring, which is vulnerable
+        to denial of service attacks from malicious input data. To learn more, see:
+        https://docs.python.org/3/library/xml.html#xml-vulnerabilities
         """
         if self._metadata is None:
             with open_czi_typed(self._path) as file:
-                """
-                Caution: The xml.etree.ElementTree module is not
-                secure against maliciously constructed data. If you need
-                to parse untrusted or unauthenticated data see XML vulnerabilities.
-                TODO highlight this better? aicspylibczi does the same thing though
-                """
                 self._metadata = ElementTree.fromstring(file.raw_metadata)
         return self._metadata
 
@@ -550,14 +549,8 @@ def get_channel_names(
         channel_name = channel.attrib.get("Name")
         channel_id = channel.attrib.get("Id")
         if channel_name is None:
-            # TODO: the next best guess is to see if there's a Name in
+            # Idea: we could try to find a channel name from
             # DisplaySetting/Channels/Channel
-            # xpath_str = "./Metadata/DisplaySetting/Channels"
-            # displaysetting_channels = xml.findall(xpath_str)
-            # ds_channels = displaysetting_channels[0].findall("./Channel")
-            # to find matching channel must match on Id attribute or if Id not
-            # present, just on collection index i
-            # If we didn't find a match this way, just use the Id as the name
             channel_name = channel_id
         if channel_name is None:
             # This is actually an error because Id was required by the spec
