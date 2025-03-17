@@ -1,0 +1,560 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+import logging
+from typing import Any, ContextManager, Dict, Optional, Tuple
+from xml.etree import ElementTree
+
+import dask.array as da
+import numpy as np
+import xarray as xr
+from bioio_base import constants, exceptions
+from bioio_base import io as io_utils
+from bioio_base import types
+from bioio_base.dimensions import (
+    DEFAULT_DIMENSION_ORDER_LIST,
+    DimensionNames,
+    Dimensions,
+)
+from bioio_base.reader import Reader as BaseReader
+from bioio_base.types import PhysicalPixelSizes
+from dask import delayed
+from fsspec.spec import AbstractFileSystem
+from pylibCZIrw import czi
+
+from .. import utils as metadata_utils
+
+###############################################################################
+
+Metadata = ElementTree.Element
+# Example bounding box: {'X': (0, 100), 'Y': (0, 100), 'Z': (0, 20)}
+BoundingBox = Dict[str, Tuple[int, int]]
+
+log = logging.getLogger(__name__)
+
+###############################################################################
+
+PIXEL_DICT = {
+    "Gray8": np.uint8,
+    "Gray16": np.uint16,
+    "Gray32": np.uint32,  # Not supported by underlying pylibCZIrw
+    "Gray32Float": np.float32,
+    "Bgr24": np.uint8,
+    "Bgr48": np.uint16,
+    "Bgr96Float": np.float32,  # Supported by pylibCZIrw but not tested in this plugin
+    "invalid": np.uint8,
+}
+
+###############################################################################
+
+
+class Reader(BaseReader):
+    """
+    Wraps the aicspylibczi API to provide the same BioIO Reader plugin for
+    volumetric Zeiss CZI images.
+
+    Parameters
+    ----------
+    image: types.PathLike
+        Path to image file to construct Reader for.
+    fs_kwargs: Dict[str, Any]
+        Any specific keyword arguments to pass down to the fsspec created filesystem.
+        Default: {}
+    """
+
+    _xarray_dask_data: Optional["xr.DataArray"] = None
+    _xarray_data: Optional["xr.DataArray"] = None
+    _dims: Optional[Dimensions] = None
+    _metadata: Optional[Metadata] = None
+    _scenes: Optional[Tuple[str, ...]] = None
+    _current_scene_index: int = 0
+    _fs: "AbstractFileSystem"
+    _path: str
+
+    @staticmethod
+    def _is_supported_image(
+        fs: AbstractFileSystem,
+        path: str,
+        **kwargs: Any,
+    ) -> bool:
+        """
+        Check if file is a supported CZI by attempting to open it. This is a
+
+        Parameters
+        ----------
+        fs: AbstractFileSystem
+            The file system to used for reading.
+        path: str
+            The path to the file to read.
+        kwargs: Any
+            Any kwargs used for reading and validation of the file.
+
+        Returns
+        -------
+        supported: bool
+            Boolean value indicating if the file is supported by the reader.
+        """
+        try:
+            with open(path):
+                return True
+        except RuntimeError:
+            return False
+
+    def __init__(self, image: types.PathLike, fs_kwargs: Dict[str, Any] = {}) -> None:
+        self._fs, self._path = io_utils.pathlike_to_fs(
+            image, enforce_exists=True, fs_kwargs=fs_kwargs
+        )
+
+        if not self._is_supported_image(self._fs, self._path):
+            raise exceptions.UnsupportedFileFormatError(
+                self.__class__.__name__, self._path
+            )
+
+    @property
+    def scenes(self) -> Tuple[str, ...]:
+        """
+        Returns
+        -------
+        scenes: Tuple[str, ...]
+            A tuple of valid scene ids in the file.
+
+        Notes
+        -----
+        Scene IDs are strings - not a range of integers.
+
+        When iterating over scenes please use:
+
+        >>> for id in image.scenes
+
+        and not:
+
+        >>> for i in range(len(image.scenes))
+        """
+
+        def scene_name(metadata: Metadata, scene_index: int) -> str:
+            scene_info = metadata.findall(
+                "./Metadata/Information/Image/Dimensions/"
+                f"S/Scenes/Scene[@Index='{scene_index}']"
+            )
+            if len(scene_info) != 1:
+                raise UnsupportedMetadataError(
+                    f"Expected 1 scene for index '{scene_index}' "
+                    "but found {len(scene_info)}."
+                )
+            scene_name = scene_info[0].attrib["Name"]
+            if type(scene_name) != str:
+                # Fall back to index if name is raw bytes
+                return str(scene_index)
+            return scene_name
+
+        if self._scenes is None:
+            with open(self._path) as file:
+                # Underlying scene IDs are ints
+                scene_ids = file.scenes_bounding_rectangle.keys()
+                self._scenes = tuple(scene_name(self.metadata, i) for i in scene_ids)
+                if len(self._scenes) < 1:
+                    # If there are no scenes, use the default scene ID
+                    self._scenes = (metadata_utils.generate_ome_image_id(0),)
+
+        return self._scenes
+
+    def _get_coords(
+        self, xml: Metadata, scene_index: int, dims_shape: Dict[str, Any]
+    ) -> Dict[str, list | np.ndarray]:
+        """
+        Generate coordinate arrays for channel dimension ("C") and spatial dimensions
+        ("X", "Y", and "Z") based on channel names and physical pixel sizes.
+
+        Time coordinates are not handled here.
+        Hypothetically, we could get the interval between time points from the metadata
+        and generate a time coordinate array.
+        """
+        coords: Dict[str, list | np.ndarray] = {}
+
+        channel_names = get_channel_names(xml, scene_index, dims_shape)
+        if channel_names is not None:
+            coords[DimensionNames.Channel] = channel_names
+
+        # Handle Spatial Dimensions
+        for dim_name, scale in self.physical_pixel_sizes._asdict().items():
+            if scale is not None and dim_name in dims_shape:
+                dim_size = size(dims_shape, dim_name)
+                coords[dim_name] = Reader._generate_coord_array(0, dim_size, scale)
+
+        return coords
+
+    def _read_delayed(self) -> xr.DataArray:
+        """
+        The delayed data array constructor for the image.
+
+        Returns
+        -------
+        data: xr.DataArray
+            The fully constructed delayed DataArray.
+
+            It is additionally recommended to closely monitor how dask array chunks are
+            managed.
+
+        Notes
+        -----
+        Requirements for the returned xr.DataArray:
+        * Must have the `dims` populated.
+        * If a channel dimension is present, please populate the channel dimensions
+        coordinate array the respective channel coordinate values.
+        """
+        total_bounding_box: BoundingBox
+        pixel_types: Dict[int, str]
+        scenes_bounding_rectangle: Dict[int, czi.Rectangle]
+        with open(self._path) as file:
+            total_bounding_box = file.total_bounding_box_no_pyramid
+            pixel_types = file.pixel_types
+            scenes_bounding_rectangle = file.scenes_bounding_rectangle_no_pyramid
+
+        # Combine the dimension bounds from total_bounding_box and
+        # scenes_bounding_rectangle
+        dim_bounds = total_bounding_box
+        if len(scenes_bounding_rectangle) > 0:
+            assert (
+                self._current_scene_index in scenes_bounding_rectangle
+            ), f"Expected {self._current_scene_index} in {scenes_bounding_rectangle}."
+            rect = scenes_bounding_rectangle[self._current_scene_index]
+            dim_bounds[DimensionNames.SpatialX] = (rect.x, rect.x + rect.w)
+            dim_bounds[DimensionNames.SpatialY] = (rect.y, rect.y + rect.h)
+        coords = self._get_coords(self.metadata, self._current_scene_index, dim_bounds)
+
+        # Put the available dimensions in the default order
+        ordered_dims = [
+            d
+            for d in DEFAULT_DIMENSION_ORDER_LIST
+            if d in coords or size(total_bounding_box, d) > 1
+        ]
+        assert ordered_dims[-2:] == [DimensionNames.SpatialY, DimensionNames.SpatialX]
+        # E.g., non_yx_dims = ['T', 'C', 'Z']
+        non_yx_dims = ordered_dims[:-2]
+
+        # E.g., shape = (30, 2, 20, 100, 100)
+        shape = tuple(
+            len(coords[d]) if d in coords else size(total_bounding_box, d)
+            for d in ordered_dims
+        )
+        # E.g., shape_without_yx = (30, 2, 20)
+        shape_without_yx = shape[:-2]
+
+        def array_builder(indices: tuple[int]) -> int:
+            """
+            Internal helper method to get one chunk of the image data.
+
+            Example
+            -------
+            >>> file: czi.CziReader
+            >>> non_yx_dims = ['T', 'C', 'Z']
+            >>> indices = [0, 1, 2]
+            >>> array_builder(0, 1, 2) = file.read(
+            ...   scene=0,
+            ...   plane={'T': 0, 'C': 1, 'Z': 2}
+            ... )
+            """
+            assert len(indices) >= len(
+                non_yx_dims
+            ), f"Expected {len(indices)} >= {len(non_yx_dims)}."
+            # E.g., plane = {'T': 0, 'C': 1, 'Z': 2}
+            plane = {d: indices[i] for i, d in enumerate(non_yx_dims)}
+            with open(self._path) as file:
+                scene: int | None
+                if len(file.scenes_bounding_rectangle_no_pyramid) == 0:
+                    # Some files have no scenes but can still be read if scene is not
+                    # specified.
+                    scene = None
+                    roi = None
+                else:
+                    # The purpose of this next line is complicated.
+                    # ROI stands for Region Of Interest.
+                    #
+                    # In pylibczi's read method, the default ROI is the bounding
+                    # rectangle of the scene **across all zoom levels**. We are going to
+                    # read just the highest resolution level (zoom = 1), which is
+                    # smaller than the default ROI in some cases. For example,
+                    # scene 0 of the test file S=2_4x2_T=2=Z=3_CH=2.czi is 947x487 when
+                    # looking at only the highest resolution, but is 948x488 when
+                    # all zoom levels are considered. (I believe this is because at zoom
+                    # 0.5, the result is ceiling(947/2) x ceiling(487/2).)
+                    #
+                    # See also: file.scenes_bounding_rectangle vs.
+                    # file.scenes_bounding_rectangle_no_pyramid.
+                    #
+                    # Therefore, when calling read, we crop to just the ROI of the
+                    # highest resolution level.
+                    scene = self._current_scene_index
+                    roi = scenes_bounding_rectangle[scene]
+                result = file.read(scene=scene, plane=plane, roi=roi)
+                # result.shape is (Y, X, 1) or (Y, X, 3) depending on whether it's RGB
+                # or grayscale.
+                return np.squeeze(result)
+
+        # The Y and X shape of lazy_arrrays are both 1 because we are making each YX
+        # slice a single chunk.
+        # E.g., lazy_arrays.shape = (30, 2, 20, 1, 1)
+        lazy_arrays: np.ndarray = np.ndarray(shape_without_yx + (1, 1), dtype=object)
+        chunk_shape = shape[-2:]
+        mapped_dims = ordered_dims
+        if "Bgr" in pixel_types[0]:
+            # If the image is BGR, each chunk has shape (X, Y, 3)
+            chunk_shape += (3,)
+            mapped_dims.append(DimensionNames.Samples)
+        for np_index, _ in np.ndenumerate(lazy_arrays):
+            lazy_arrays[np_index] = da.from_delayed(
+                delayed(array_builder)(np_index),
+                chunk_shape,
+                dtype=PIXEL_DICT[pixel_types[0]],
+            )
+        merged = da.block(lazy_arrays.tolist())
+
+        return xr.DataArray(
+            data=merged,
+            dims=mapped_dims,
+            coords=coords,
+            attrs={constants.METADATA_UNPROCESSED: self.metadata},
+        )
+
+    def _read_immediate(self) -> xr.DataArray:
+        """
+        The immediate data array constructor for the image.
+
+        Returns
+        -------
+        data: xr.DataArray
+            The fully read data array.
+
+        Notes
+        -----
+        Requirements for the returned xr.DataArray:
+        * Must have the `dims` populated.
+        * If a channel dimension is present, please populate the channel dimensions
+        coordinate array the respective channel coordinate values.
+        """
+        return self._read_delayed().compute()
+
+    def _get_stitched_dask_mosaic(self) -> xr.DataArray:
+        """
+        This reader always stiches the entire image together, as the underlying
+        pylibczirw does not support reading individual tiles.
+
+        Returns
+        -------
+        mosaic: xr.DataArray
+            The fully stitched together image. Contains all the dimensions of the image
+            with the YX expanded to the full mosaic.
+        """
+        return self.xarray_dask_data
+
+    def _get_stitched_mosaic(self) -> xr.DataArray:
+        """
+        This reader always stiches the entire image together, as the underlying
+        pylibczirw does not support reading individual tiles.
+
+        Returns
+        -------
+        mosaic: np.ndarray
+            The fully stitched together image. Contains all the dimensions of the image
+            with the YX expanded to the full mosaic.
+        """
+        return self.xarray_data
+
+    @property
+    def mosaic_xarray_dask_data(self) -> xr.DataArray:
+        """
+        This reader always stiches the entire image together, as the underlying
+        pylibczirw does not support reading individual tiles.
+
+        Returns
+        -------
+        xarray_dask_data: xr.DataArray
+            The delayed stiched mosaic image and metadata as an annotated data array.
+        """
+        return self.xarray_dask_data
+
+    @property
+    def mosaic_xarray_data(self) -> xr.DataArray:
+        """
+        This reader always stiches the entire image together, as the underlying
+        pylibczirw does not support reading individual tiles.
+
+        Returns
+        -------
+        xarray_dask_data: xr.DataArray
+            The in-memory stitched mosaic image and metadata as an annotated data array.
+        """
+        return self.xarray_data
+
+    @property
+    def metadata(self) -> Metadata:
+        """
+        Returns
+        -------
+        metadata: Any
+            The metadata for the formats supported by the inhereting Reader.
+
+            If the inheriting Reader supports processing the metadata into a more useful
+            format / Python object, this will return the result.
+
+            For both the unprocessed and processed metadata from the file, use
+            `xarray_dask_data.attrs` which will contain a dictionary with keys:
+            `unprocessed` and `processed` that you can then select.
+
+        Caution
+        -------
+        This method uses the xml.etree.ElementTree.fromstring, which is vulnerable
+        to denial of service attacks from malicious input data. To learn more, see:
+        https://docs.python.org/3/library/xml.html#xml-vulnerabilities
+        """
+        if self._metadata is None:
+            with open(self._path) as file:
+                self._metadata = ElementTree.fromstring(file.raw_metadata)
+        return self._metadata
+
+    @property
+    def physical_pixel_sizes(self) -> PhysicalPixelSizes:
+        """
+        Returns
+        -------
+        sizes: PhysicalPixelSizes
+            Using available metadata, the floats representing physical pixel sizes for
+            dimensions Z, Y, and X.
+
+        Notes
+        -----
+        We currently do not handle unit attachment to these values. Please see the file
+        metadata for unit information.
+        """
+
+        def physical_pixel_size(
+            metadata: Metadata, dimension: str, allow_none: bool = False
+        ) -> float | None:
+            scales = metadata.findall(
+                f"./Metadata/Scaling/Items/Distance[@Id='{dimension}']"
+            )
+
+            if len(scales) != 1:
+                if allow_none and len(scales) == 0:
+                    return None
+                raise UnsupportedMetadataError(
+                    f"Expected 1 distance scale for dimension '{dimension}' but found "
+                    f"{len(scales)}."
+                )
+
+            unparsed_scale = scales[0].find("./Value")
+            if unparsed_scale is None or unparsed_scale.text is None:
+                raise UnsupportedMetadataError(
+                    f"Could not find any distance scale for dimension '{dimension}'."
+                )
+            scale_m = float(unparsed_scale.text)
+            # The values are stored in units of meters always in .czi. Convert to
+            # microns.
+            return scale_m / 1e-6
+
+        return PhysicalPixelSizes(
+            Z=physical_pixel_size(self.metadata, "Z", allow_none=True),
+            Y=physical_pixel_size(self.metadata, "Y"),
+            X=physical_pixel_size(self.metadata, "X"),
+        )
+
+    @property
+    def mosaic_tile_dims(self) -> None:
+        """
+        Returns
+        -------
+        tile_dims: None
+            Inherited method. Mosaic tiles are not supported by the underlying
+            pylibCZIrw.
+        """
+        return None
+
+
+def open_czi_typed(
+    filepath: str,
+    file_input_type: czi.ReaderFileInputTypes = czi.ReaderFileInputTypes.Standard,
+    cache_options: czi.CacheOptions | None = None,
+) -> ContextManager[czi.CziReader]:
+    """
+    Wrapper around czi.open_czi to provide type hinting that clarifies the result
+    is a czi.CziReader
+    """
+    return czi.open_czi(filepath, file_input_type, cache_options)
+
+
+def open(filepath: str) -> ContextManager[czi.CziReader]:
+    if filepath.startswith("http") or filepath.startswith("https"):
+        return open_czi_typed(filepath, czi.ReaderFileInputTypes.Curl)
+    return open_czi_typed(filepath)
+
+
+class UnsupportedMetadataError(Exception):
+    """
+    The reader encountered metadata it doesn't know how to handle.
+    """
+
+
+def get_channel_names(
+    xml: Metadata, scene_index: int, dims_shape: Dict[str, Any]
+) -> Optional[list[str]]:
+    """
+    Get the channel names for the given scene index.
+
+    Parameters
+    ----------
+    metadata: Metadata
+        The metadata to search for channel names.
+    scene_index: int
+    """
+    # Get all images
+    img_sets = xml.findall(".//Image/Dimensions/Channels")
+
+    if len(img_sets) == 0:
+        return None
+
+    # Select the current scene
+    img = img_sets[0]
+    if scene_index < len(img_sets):
+        img = img_sets[scene_index]
+
+    # Construct channel name list
+    scene_channel_list = []
+    channels = img.findall("./Channel")
+    number_of_channels_in_data = size(dims_shape, DimensionNames.Channel)
+
+    # There may be more channels in the metadata than in the data
+    # if so, we will just use the first N channels and log
+    # a warning to the user
+    if len(channels) > number_of_channels_in_data:
+        log.warning(
+            "More channels in metadata than in data "
+            f"({len(channels)} vs. {number_of_channels_in_data})"
+        )
+
+    for i, channel in enumerate(channels[:number_of_channels_in_data]):
+        # Id is required, Name is not.
+        # But we prefer to use Name if it is present
+        channel_name = channel.attrib.get("Name")
+        channel_id = channel.attrib.get("Id")
+        if channel_name is None:
+            # Idea: we could try to find a channel name from
+            # DisplaySetting/Channels/Channel
+            channel_name = channel_id
+        if channel_name is None:
+            # This is actually an error because Id was required by the spec
+            channel_name = metadata_utils.generate_ome_channel_id(
+                str(scene_index), str(i)
+            )
+
+        scene_channel_list.append(channel_name)
+    return scene_channel_list
+
+
+def size(bounding_box: BoundingBox, dim: str) -> int:
+    """
+    Return the size of the dimension if it is in the bounding box, otherwise -1.
+    """
+    if dim not in bounding_box:
+        return -1
+    bounds = bounding_box[dim]
+    return bounds[1] - bounds[0]

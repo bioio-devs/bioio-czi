@@ -13,6 +13,7 @@ from fsspec import AbstractFileSystem
 from ome_types.model.ome import OME
 
 from bioio_czi.aicspylibczi_reader.reader import Reader as AicsPyLibCziReader
+from bioio_czi.pylibczirw_reader.reader import Reader as PylibCziReader
 
 from . import utils as metadata_utils
 
@@ -25,7 +26,7 @@ class Reader(BaseReader):
 
     # Note: Any public method overridden by PylibCziReader or AicsPyLibCziReader must
     # explicitly be defined here, using self._implementation
-    _implementation: AicsPyLibCziReader
+    _implementation: PylibCziReader | AicsPyLibCziReader
 
     # Although _fs is named with an underscore, it is used by tests, so must be exposed
     # from the implementation.
@@ -66,7 +67,9 @@ class Reader(BaseReader):
         supported: bool
             Boolean value indicating if the file is supported by the reader.
         """
-        return AicsPyLibCziReader._is_supported_image(fs, path, **kwargs)
+        return PylibCziReader._is_supported_image(
+            fs, path, **kwargs
+        ) or AicsPyLibCziReader._is_supported_image(fs, path, **kwargs)
 
     def __init__(
         self, image: PathLike, use_aicspylibczi: bool = False, **kwargs: Any
@@ -93,10 +96,11 @@ class Reader(BaseReader):
             Any specific keyword arguments to pass to the fsspec-created filesystem.
             Default: {}
         """
+        # TODO handle case where "wrong" reader is called
         if use_aicspylibczi:
             self._implementation = AicsPyLibCziReader(image, **kwargs)
         else:
-            raise NotImplementedError("Only aicspylibczi reader is implemented")
+            self._implementation = PylibCziReader(image, **kwargs)
 
     @property
     def scenes(self) -> Tuple[str, ...]:
