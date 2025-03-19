@@ -25,7 +25,6 @@ from bioio_base.reader import Reader as BaseReader
 from dask import delayed
 from fsspec.implementations.local import LocalFileSystem
 from fsspec.spec import AbstractFileSystem
-from ome_types.model.ome import OME
 
 from .. import utils as metadata_utils
 
@@ -906,13 +905,6 @@ class Reader(BaseReader):
 
     def _get_stitched_mosaic(self) -> xr.DataArray:
         return self._construct_mosaic_xarray(self.data)
-
-    @property
-    def ome_metadata(self) -> OME:
-        return metadata_utils.transform_metadata_with_xslt(
-            self.metadata,
-            Path(__file__).parent / "czi-to-ome-xslt/xslt/czi-to-ome.xsl",
-        )
 
     @property
     def physical_pixel_sizes(self) -> types.PhysicalPixelSizes:
