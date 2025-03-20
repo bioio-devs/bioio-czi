@@ -21,10 +21,11 @@ from bioio_base.dimensions import (
     DimensionNames,
     Dimensions,
 )
-from bioio_base.reader import Reader as BaseReader
 from dask import delayed
 from fsspec.implementations.local import LocalFileSystem
 from fsspec.spec import AbstractFileSystem
+
+from bioio_czi.reader import Reader
 
 from .. import utils as metadata_utils
 
@@ -55,7 +56,7 @@ PIXEL_DICT = {
 ###############################################################################
 
 
-class Reader(BaseReader):
+class AicsPyLibCziReader(Reader):
     """
     Wraps the aicspylibczi API to provide the same BioIO Reader plugin for
     volumetric Zeiss CZI images.
@@ -100,6 +101,7 @@ class Reader(BaseReader):
         chunk_dims: Union[str, List[str]] = DEFAULT_CHUNK_DIMS,
         include_subblock_metadata: bool = False,
         fs_kwargs: Dict[str, Any] = {},
+        use_aicspylibczi: bool = True,
     ):
         """
         Parameters
@@ -118,6 +120,8 @@ class Reader(BaseReader):
         fs_kwargs: Dict[str, Any]
             Any specific keyword arguments to pass to the fsspec-created filesystem.
             Default: {}
+        use_aicspylibczi: bool
+            Ignored
         """
         # Expand details of provided image
         self._fs, self._path = io_utils.pathlike_to_fs(
@@ -156,7 +160,7 @@ class Reader(BaseReader):
         if self._mapped_dims is None:
             with self._fs.open(self._path) as open_resource:
                 czi = CziFile(open_resource.f)
-                self._mapped_dims = Reader._fix_czi_dims(czi.dims)
+                self._mapped_dims = AicsPyLibCziReader._fix_czi_dims(czi.dims)
 
         return self._mapped_dims
 
@@ -320,7 +324,7 @@ class Reader(BaseReader):
         scene: int,
         read_dims: Optional[Dict[str, int]] = None,
     ) -> np.ndarray:
-        return Reader._get_image_data(
+        return AicsPyLibCziReader._get_image_data(
             fs=fs, path=path, scene=scene, read_dims=read_dims
         )[0]
 
@@ -363,7 +367,7 @@ class Reader(BaseReader):
             czi = CziFile(open_resource.f)
 
             # Get current scene read dims
-            adjusted_scene_index = Reader._adjust_scene_index(
+            adjusted_scene_index = AicsPyLibCziReader._adjust_scene_index(
                 czi.get_dims_shape(), scene, czi.shape_is_consistent
             )
             read_dims[CZI_SCENE_DIM_CHAR] = adjusted_scene_index
@@ -414,7 +418,7 @@ class Reader(BaseReader):
         self.chunk_dims = [d.upper() for d in self.chunk_dims]
 
         # Construct the delayed dask array
-        dims_shape = Reader._dims_shape_to_scene_dims_shape(
+        dims_shape = AicsPyLibCziReader._dims_shape_to_scene_dims_shape(
             czi.get_dims_shape(),
             scene_index=self.current_scene_index,
             consistent=czi.shape_is_consistent,
@@ -510,7 +514,7 @@ class Reader(BaseReader):
 
             # Add delayed array to lazy arrays at index
             lazy_arrays[np_index] = da.from_delayed(
-                delayed(Reader._read_chunk_from_image)(
+                delayed(AicsPyLibCziReader._read_chunk_from_image)(
                     fs=self._fs,
                     path=self._path,
                     scene=self.current_scene_index,
@@ -636,7 +640,9 @@ class Reader(BaseReader):
         ]:
             if scale is not None and dim_name in dims_shape:
                 dim_size = dims_shape[dim_name][1] - dims_shape[dim_name][0]
-                coords[dim_name] = Reader._generate_coord_array(0, dim_size, scale)
+                coords[dim_name] = AicsPyLibCziReader._generate_coord_array(
+                    0, dim_size, scale
+                )
 
         # Time
         # TODO: unpack "TimeSpan" elements
@@ -665,7 +671,7 @@ class Reader(BaseReader):
         with self._fs.open(self._path) as open_resource:
             czi = CziFile(open_resource.f)
 
-            dims_shape = Reader._dims_shape_to_scene_dims_shape(
+            dims_shape = AicsPyLibCziReader._dims_shape_to_scene_dims_shape(
                 dims_shape=czi.get_dims_shape(),
                 scene_index=self.current_scene_index,
                 consistent=czi.shape_is_consistent,
@@ -725,7 +731,7 @@ class Reader(BaseReader):
         """
         with self._fs.open(self._path) as open_resource:
             czi = CziFile(open_resource.f)
-            dims_shape = Reader._dims_shape_to_scene_dims_shape(
+            dims_shape = AicsPyLibCziReader._dims_shape_to_scene_dims_shape(
                 dims_shape=czi.get_dims_shape(),
                 scene_index=self.current_scene_index,
                 consistent=czi.shape_is_consistent,
@@ -843,7 +849,7 @@ class Reader(BaseReader):
         # Get max of mosaic positions from lif
         with self._fs.open(self._path) as open_resource:
             czi = CziFile(open_resource.f)
-            dims_shape = Reader._dims_shape_to_scene_dims_shape(
+            dims_shape = AicsPyLibCziReader._dims_shape_to_scene_dims_shape(
                 dims_shape=czi.get_dims_shape(),
                 scene_index=self.current_scene_index,
                 consistent=czi.shape_is_consistent,
@@ -883,12 +889,16 @@ class Reader(BaseReader):
             # Add expanded Y and X coords
             if self.physical_pixel_sizes.Y is not None:
                 dim_y_index = dims.index(DimensionNames.SpatialY)
-                coords[DimensionNames.SpatialY] = Reader._generate_coord_array(
+                coords[
+                    DimensionNames.SpatialY
+                ] = AicsPyLibCziReader._generate_coord_array(
                     0, stitched.shape[dim_y_index], self.physical_pixel_sizes.Y
                 )
             if self.physical_pixel_sizes.X is not None:
                 dim_x_index = dims.index(DimensionNames.SpatialX)
-                coords[DimensionNames.SpatialX] = Reader._generate_coord_array(
+                coords[
+                    DimensionNames.SpatialX
+                ] = AicsPyLibCziReader._generate_coord_array(
                     0, stitched.shape[dim_x_index], self.physical_pixel_sizes.X
                 )
 

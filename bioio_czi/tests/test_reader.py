@@ -1,5 +1,5 @@
 from bioio_czi import Reader
-from bioio_czi.aicspylibczi_reader.reader import Reader as AicsPyLibCziRwReader
+from bioio_czi.aicspylibczi_reader.reader import AicsPyLibCziReader
 
 from .conftest import LOCAL_RESOURCES_DIR
 
@@ -12,4 +12,4 @@ def test_use_aicspylibczi_true() -> None:
     reader = Reader(uri, use_aicspylibczi=True)
 
     # Assert
-    assert isinstance(reader._implementation, AicsPyLibCziRwReader)
+    assert isinstance(reader, AicsPyLibCziReader)
