@@ -27,7 +27,7 @@ from fsspec.implementations.local import LocalFileSystem
 from fsspec.spec import AbstractFileSystem
 from ome_types.model.ome import OME
 
-from . import utils as metadata_utils
+from .. import utils as metadata_utils
 
 ###############################################################################
 
