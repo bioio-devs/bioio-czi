@@ -25,7 +25,6 @@ from bioio_base.reader import Reader as BaseReader
 from dask import delayed
 from fsspec.implementations.local import LocalFileSystem
 from fsspec.spec import AbstractFileSystem
-from ome_types.model.ome import OME
 
 from .. import utils as metadata_utils
 
@@ -60,23 +59,6 @@ class Reader(BaseReader):
     """
     Wraps the aicspylibczi API to provide the same BioIO Reader plugin for
     volumetric Zeiss CZI images.
-
-    Parameters
-    ----------
-    image: types.PathLike
-        Path to image file to construct Reader for.
-    chunk_dims: Union[str, List[str]]
-        Which dimensions to create chunks for.
-        Default: DEFAULT_CHUNK_DIMS
-        Note: DimensionNames.SpatialY, DimensionNames.SpatialX, and
-        DimensionNames.Samples, will always be added to the list if not present during
-        dask array construction.
-    include_subblock_metadata: bool
-        Whether to append metadata from the subblocks to the rest of the embeded
-        metadata.
-    fs_kwargs: Dict[str, Any]
-        Any specific keyword arguments to pass down to the fsspec created filesystem.
-        Default: {}
 
     Notes
     -----
@@ -119,6 +101,24 @@ class Reader(BaseReader):
         include_subblock_metadata: bool = False,
         fs_kwargs: Dict[str, Any] = {},
     ):
+        """
+        Parameters
+        ----------
+        image: types.PathLike
+            Path to image file to construct Reader for.
+        chunk_dims: Union[str, List[str]]
+            Which dimensions to create chunks for.
+            Default: DEFAULT_CHUNK_DIMS
+            Note: DimensionNames.SpatialY, DimensionNames.SpatialX, and
+            DimensionNames.Samples, will always be added to the list if not present
+            during dask array construction.
+        include_subblock_metadata: bool
+            Whether to append metadata from the subblocks to the rest of the embeded
+            metadata.
+        fs_kwargs: Dict[str, Any]
+            Any specific keyword arguments to pass to the fsspec-created filesystem.
+            Default: {}
+        """
         # Expand details of provided image
         self._fs, self._path = io_utils.pathlike_to_fs(
             image,
@@ -906,13 +906,6 @@ class Reader(BaseReader):
 
     def _get_stitched_mosaic(self) -> xr.DataArray:
         return self._construct_mosaic_xarray(self.data)
-
-    @property
-    def ome_metadata(self) -> OME:
-        return metadata_utils.transform_metadata_with_xslt(
-            self.metadata,
-            Path(__file__).parent / "czi-to-ome-xslt/xslt/czi-to-ome.xsl",
-        )
 
     @property
     def physical_pixel_sizes(self) -> types.PhysicalPixelSizes:
