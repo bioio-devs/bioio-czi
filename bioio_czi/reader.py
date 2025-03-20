@@ -19,16 +19,8 @@ from . import utils as metadata_utils
 
 class Reader(BaseReader):
     """
-    Wraps the pylibczirw and aicspylibczi APIs to provide the same BioIO Reader plugin
+    Wraps the pylibczirw and aicspylibczi APIs to provide a BioIO Reader plugin
     for volumetric Zeiss CZI images.
-
-    Parameters
-    ----------
-    image: types.PathLike
-        Path to image file to construct Reader for.
-    fs_kwargs: Dict[str, Any]
-        Any specific keyword arguments to pass down to the fsspec created filesystem.
-        Default: {}
     """
 
     # Note: Any public method overridden by PylibCziReader or AicsPyLibCziReader must
@@ -80,7 +72,26 @@ class Reader(BaseReader):
         self, image: PathLike, use_aicspylibczi: bool = False, **kwargs: Any
     ) -> None:
         """
-        TODO docstring
+        Parameters
+        ----------
+        image: types.PathLike
+            Path to image file.
+        use_aicspylibczi: bool
+            Read CZIs with the aicspylibczi library. Use aicspylibczi if you want to
+            read individual tiles from a scene. However, aicspylibczi cannot read files
+            over the internet. Default: False
+        chunk_dims: Union[str, List[str]]
+            Which dimensions to create chunks for.
+            Default: DEFAULT_CHUNK_DIMS
+            Note: DimensionNames.SpatialY, DimensionNames.SpatialX, and
+            DimensionNames.Samples, will always be added to the list if not present
+            during dask array construction.
+        include_subblock_metadata: bool
+            Whether to append metadata from the subblocks to the rest of the embeded
+            metadata.
+        fs_kwargs: Dict[str, Any]
+            Any specific keyword arguments to pass to the fsspec-created filesystem.
+            Default: {}
         """
         if use_aicspylibczi:
             self._implementation = AicsPyLibCziReader(image, **kwargs)
@@ -93,7 +104,7 @@ class Reader(BaseReader):
         Returns
         -------
         scenes: Tuple[str, ...]
-            A tuple of valid scene ids in the file.
+            A tuple of valid scene IDs in the file.
 
         Notes
         -----
@@ -115,18 +126,11 @@ class Reader(BaseReader):
 
         Returns
         -------
-        data: xr.DataArray
+        data: xarray.DataArray
             The fully constructed delayed DataArray.
 
             It is additionally recommended to closely monitor how dask array chunks are
             managed.
-
-        Notes
-        -----
-        Requirements for the returned xr.DataArray:
-        * Must have the `dims` populated.
-        * If a channel dimension is present, please populate the channel dimensions
-        coordinate array the respective channel coordinate values.
         """
         return self._implementation._read_delayed()
 
@@ -136,26 +140,16 @@ class Reader(BaseReader):
 
         Returns
         -------
-        data: xr.DataArray
+        data: xarray.DataArray
             The fully read data array.
-
-        Notes
-        -----
-        Requirements for the returned xr.DataArray:
-        * Must have the `dims` populated.
-        * If a channel dimension is present, please populate the channel dimensions
-        coordinate array the respective channel coordinate values.
         """
         return self._implementation._read_immediate()
 
     def _get_stitched_dask_mosaic(self) -> xr.DataArray:
         """
-        This reader always stiches the entire image together, as the underlying
-        pylibczirw does not support reading individual tiles.
-
         Returns
         -------
-        mosaic: xr.DataArray
+        mosaic: xarray.DataArray
             The fully stitched together image. Contains all the dimensions of the image
             with the YX expanded to the full mosaic.
         """
@@ -163,12 +157,9 @@ class Reader(BaseReader):
 
     def _get_stitched_mosaic(self) -> xr.DataArray:
         """
-        This reader always stiches the entire image together, as the underlying
-        pylibczirw does not support reading individual tiles.
-
         Returns
         -------
-        mosaic: np.ndarray
+        mosaic: numpy.ndarray
             The fully stitched together image. Contains all the dimensions of the image
             with the YX expanded to the full mosaic.
         """
@@ -177,12 +168,9 @@ class Reader(BaseReader):
     @property
     def mosaic_xarray_dask_data(self) -> xr.DataArray:
         """
-        This reader always stiches the entire image together, as the underlying
-        pylibczirw does not support reading individual tiles.
-
         Returns
         -------
-        xarray_dask_data: xr.DataArray
+        xarray_dask_data: xarray.DataArray
             The delayed stiched mosaic image and metadata as an annotated data array.
         """
         return self._implementation.mosaic_xarray_dask_data
@@ -190,12 +178,9 @@ class Reader(BaseReader):
     @property
     def mosaic_xarray_data(self) -> xr.DataArray:
         """
-        This reader always stiches the entire image together, as the underlying
-        pylibczirw does not support reading individual tiles.
-
         Returns
         -------
-        xarray_dask_data: xr.DataArray
+        xarray_dask_data: xarray.DataArray
             The in-memory stitched mosaic image and metadata as an annotated data array.
         """
         return self._implementation.mosaic_xarray_data
@@ -205,7 +190,7 @@ class Reader(BaseReader):
         """
         Returns
         -------
-        metadata: Any
+        metadata: xml.etree.ElementTree.Element
             The metadata for the formats supported by the inhereting Reader.
 
             If the inheriting Reader supports processing the metadata into a more useful
@@ -257,12 +242,11 @@ class Reader(BaseReader):
     @property
     def mosaic_tile_dims(self) -> Dimensions | None:
         """
-        TODO
         Returns
         -------
-        tile_dims: None
-            Inherited method. Mosaic tiles are not supported by the underlying
-            pylibCZIrw.
+        tile_dims: Optional[Dimensions]
+            The dimensions for each tile in the mosaic image.
+            If the image is not a mosaic image, returns None.
         """
         return self._implementation.mosaic_tile_dims
 

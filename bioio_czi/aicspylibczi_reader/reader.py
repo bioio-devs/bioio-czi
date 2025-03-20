@@ -60,23 +60,6 @@ class Reader(BaseReader):
     Wraps the aicspylibczi API to provide the same BioIO Reader plugin for
     volumetric Zeiss CZI images.
 
-    Parameters
-    ----------
-    image: types.PathLike
-        Path to image file to construct Reader for.
-    chunk_dims: Union[str, List[str]]
-        Which dimensions to create chunks for.
-        Default: DEFAULT_CHUNK_DIMS
-        Note: DimensionNames.SpatialY, DimensionNames.SpatialX, and
-        DimensionNames.Samples, will always be added to the list if not present during
-        dask array construction.
-    include_subblock_metadata: bool
-        Whether to append metadata from the subblocks to the rest of the embeded
-        metadata.
-    fs_kwargs: Dict[str, Any]
-        Any specific keyword arguments to pass down to the fsspec created filesystem.
-        Default: {}
-
     Notes
     -----
     To use this reader, install with: `pip install aicspylibczi>=3.1.1`.
@@ -118,6 +101,24 @@ class Reader(BaseReader):
         include_subblock_metadata: bool = False,
         fs_kwargs: Dict[str, Any] = {},
     ):
+        """
+        Parameters
+        ----------
+        image: types.PathLike
+            Path to image file to construct Reader for.
+        chunk_dims: Union[str, List[str]]
+            Which dimensions to create chunks for.
+            Default: DEFAULT_CHUNK_DIMS
+            Note: DimensionNames.SpatialY, DimensionNames.SpatialX, and
+            DimensionNames.Samples, will always be added to the list if not present
+            during dask array construction.
+        include_subblock_metadata: bool
+            Whether to append metadata from the subblocks to the rest of the embeded
+            metadata.
+        fs_kwargs: Dict[str, Any]
+            Any specific keyword arguments to pass to the fsspec-created filesystem.
+            Default: {}
+        """
         # Expand details of provided image
         self._fs, self._path = io_utils.pathlike_to_fs(
             image,
