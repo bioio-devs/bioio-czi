@@ -84,15 +84,18 @@ class Reader(BaseReader):
             read individual tiles from a scene. However, aicspylibczi cannot read files
             over the internet. Default: False
         chunk_dims: Union[str, List[str]]
+            Ignored unless use_aicspylibczi is True.
             Which dimensions to create chunks for.
             Default: DEFAULT_CHUNK_DIMS
             Note: DimensionNames.SpatialY, DimensionNames.SpatialX, and
             DimensionNames.Samples, will always be added to the list if not present
             during dask array construction.
         include_subblock_metadata: bool
+            Ignored unless use_aicspylibczi is True.
             Whether to append metadata from the subblocks to the rest of the embeded
             metadata.
         fs_kwargs: Dict[str, Any]
+            Ignored unless use_aicspylibczi is True.
             Any specific keyword arguments to pass to the fsspec-created filesystem.
             Default: {}
         """
@@ -135,6 +138,12 @@ class Reader(BaseReader):
 
             It is additionally recommended to closely monitor how dask array chunks are
             managed.
+
+        Notes
+        -----
+        Shape of returned array depends on the value of use_aicspylibczi. If
+        use_aicspylibczi is not True, any scenes with multiple tiles will be
+        automatically stitched (where tiles overlap, the highest M-index wins).
         """
         return self._implementation._read_delayed()
 
@@ -146,6 +155,12 @@ class Reader(BaseReader):
         -------
         data: xarray.DataArray
             The fully read data array.
+
+        Notes
+        -----
+        Shape of returned array depends on the value of use_aicspylibczi. If
+        use_aicspylibczi is not True, any scenes with multiple tiles will be
+        automatically stitched (where tiles overlap, the highest M-index wins).
         """
         return self._implementation._read_immediate()
 
@@ -156,6 +171,10 @@ class Reader(BaseReader):
         mosaic: xarray.DataArray
             The fully stitched together image. Contains all the dimensions of the image
             with the YX expanded to the full mosaic.
+
+        Notes
+        -----
+        Shape of returned array depends on the value of use_aicspylibczi.
         """
         return self._implementation._get_stitched_dask_mosaic()
 
@@ -166,6 +185,10 @@ class Reader(BaseReader):
         mosaic: numpy.ndarray
             The fully stitched together image. Contains all the dimensions of the image
             with the YX expanded to the full mosaic.
+
+        Notes
+        -----
+        Shape of returned array depends on the value of use_aicspylibczi.
         """
         return self._implementation._get_stitched_mosaic()
 
