@@ -81,12 +81,24 @@ class Reader(BaseReader):
         )
 
     def _read_delayed(self) -> xr.DataArray:
+        """
+        This method is defined here so that users who do the following don't get
+        type-checking errors due to instantiating an abstract class.
+        >>> from bioio_czi import Reader
+        >>> img = Reader('path/to/czi')
+        """
         raise NotImplementedError(
             "Bug: you should automatically get a subclass of this Reader that "
             "implements _read_delayed when you call BioImage(...) or Reader(...)."
         )
 
     def _read_immediate(self) -> xr.DataArray:
+        """
+        This method is defined here so that users who do the following don't get
+        type-checking errors due to instantiating an abstract class.
+        >>> from bioio_czi import Reader
+        >>> img = Reader('path/to/czi')
+        """
         raise NotImplementedError(
             "Bug: you should automatically get a subclass of this Reader that "
             "implements _read_immediate when you call BioImage(...) or Reader(...)."
@@ -94,6 +106,12 @@ class Reader(BaseReader):
 
     @property
     def scenes(self) -> Tuple[str, ...]:
+        """
+        This method is defined here so that users who do the following don't get
+        type-checking errors due to instantiating an abstract class.
+        >>> from bioio_czi import Reader
+        >>> img = Reader('path/to/czi')
+        """
         raise NotImplementedError(
             "Bug: you should automatically get a subclass of this Reader that "
             "implements scenes when you call BioImage(...) or Reader(...)."
