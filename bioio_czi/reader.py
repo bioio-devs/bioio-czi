@@ -15,7 +15,7 @@ from ome_types.model.ome import OME
 from bioio_czi.aicspylibczi_reader.reader import Reader as AicsPyLibCziReader
 from bioio_czi.pylibczirw_reader.reader import Reader as PylibCziReader
 
-from . import utils as metadata_utils
+from . import metadata_ome
 
 
 class Reader(BaseReader):
@@ -245,7 +245,7 @@ class Reader(BaseReader):
             This likely isn't a complete transformation but is guarenteed to
             be a valid transformation.
         """
-        return metadata_utils.transform_metadata_with_xslt(
+        return metadata_ome.transform_metadata_with_xslt(
             self.metadata,
             Path(__file__).parent / "czi-to-ome-xslt/xslt/czi-to-ome.xsl",
         )

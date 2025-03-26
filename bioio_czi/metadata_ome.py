@@ -1,11 +1,15 @@
 import os
 from pathlib import Path
-from typing import Union
+from typing import Dict, Tuple, Union
 from xml.etree import ElementTree as ET
 
 import lxml.etree
 from bioio_base.types import PathLike
 from ome_types import OME
+
+Metadata = ET.Element
+# Example bounding box: {'X': (0, 100), 'Y': (0, 100), 'Z': (0, 20)}
+BoundingBox = Dict[str, Tuple[int, int]]
 
 
 def generate_ome_image_id(image_id: Union[str, int]) -> str:

@@ -22,13 +22,10 @@ from dask import delayed
 from fsspec.spec import AbstractFileSystem
 from pylibCZIrw import czi
 
-from .. import utils as metadata_utils
+from .. import metadata_ome
+from ..channels import BoundingBox, Metadata, get_channel_names, size
 
 ###############################################################################
-
-Metadata = ElementTree.Element
-# Example bounding box: {'X': (0, 100), 'Y': (0, 100), 'Z': (0, 20)}
-BoundingBox = Dict[str, Tuple[int, int]]
 
 log = logging.getLogger(__name__)
 
@@ -154,7 +151,7 @@ class Reader(BaseReader):
                 self._scenes = tuple(scene_name(self.metadata, i) for i in scene_ids)
                 if len(self._scenes) < 1:
                     # If there are no scenes, use the default scene ID
-                    self._scenes = (metadata_utils.generate_ome_image_id(0),)
+                    self._scenes = (metadata_ome.generate_ome_image_id(0),)
 
         return self._scenes
 
@@ -470,91 +467,17 @@ class Reader(BaseReader):
         return None
 
 
-def open_czi_typed(
-    filepath: str,
-    file_input_type: czi.ReaderFileInputTypes = czi.ReaderFileInputTypes.Standard,
-    cache_options: czi.CacheOptions | None = None,
-) -> ContextManager[czi.CziReader]:
+def open(filepath: str) -> ContextManager[czi.CziReader]:
     """
     Wrapper around czi.open_czi to provide type hinting that clarifies the result
     is a czi.CziReader
     """
-    return czi.open_czi(filepath, file_input_type, cache_options)
-
-
-def open(filepath: str) -> ContextManager[czi.CziReader]:
     if filepath.startswith("http") or filepath.startswith("https"):
-        return open_czi_typed(filepath, czi.ReaderFileInputTypes.Curl)
-    return open_czi_typed(filepath)
+        return czi.open_czi(filepath, czi.ReaderFileInputTypes.Curl)
+    return czi.open_czi(filepath)
 
 
 class UnsupportedMetadataError(Exception):
     """
     The reader encountered metadata it doesn't know how to handle.
     """
-
-
-def get_channel_names(
-    xml: Metadata, scene_index: int, dims_shape: Dict[str, Any]
-) -> Optional[list[str]]:
-    """
-    Get the channel names for the given scene index.
-
-    Parameters
-    ----------
-    metadata: Metadata
-        The metadata to search for channel names.
-    scene_index: int
-    """
-    # Get all images
-    img_sets = xml.findall(".//Image/Dimensions/Channels")
-
-    if len(img_sets) == 0:
-        return None
-
-    # Select the current scene
-    img = img_sets[0]
-    if scene_index < len(img_sets):
-        img = img_sets[scene_index]
-
-    # Construct channel name list
-    scene_channel_list = []
-    channels = img.findall("./Channel")
-    number_of_channels_in_data = size(dims_shape, DimensionNames.Channel)
-
-    # There may be more channels in the metadata than in the data
-    # if so, we will just use the first N channels and log
-    # a warning to the user
-    if len(channels) > number_of_channels_in_data:
-        log.warning(
-            "More channels in metadata than in data "
-            f"({len(channels)} vs. {number_of_channels_in_data})"
-        )
-
-    for i, channel in enumerate(channels[:number_of_channels_in_data]):
-        # Id is required, Name is not.
-        # But we prefer to use Name if it is present
-        channel_name = channel.attrib.get("Name")
-        channel_id = channel.attrib.get("Id")
-        if channel_name is None:
-            # Idea: we could try to find a channel name from
-            # DisplaySetting/Channels/Channel
-            channel_name = channel_id
-        if channel_name is None:
-            # This is actually an error because Id was required by the spec
-            channel_name = metadata_utils.generate_ome_channel_id(
-                str(scene_index), str(i)
-            )
-
-        scene_channel_list.append(channel_name)
-    return scene_channel_list
-
-
-def size(bounding_box: BoundingBox, dim: str) -> int:
-    """
-    Return the size of the dimension if it is in the bounding box, otherwise -1.
-    """
-    if dim not in bounding_box:
-        return -1
-    bounds = bounding_box[dim]
-    return bounds[1] - bounds[0]

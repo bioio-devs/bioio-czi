@@ -26,7 +26,8 @@ from dask import delayed
 from fsspec.implementations.local import LocalFileSystem
 from fsspec.spec import AbstractFileSystem
 
-from .. import utils as metadata_utils
+from .. import metadata_ome as metadata_utils
+from ..channels import get_channel_names
 
 ###############################################################################
 
@@ -556,53 +557,9 @@ class Reader(BaseReader):
         # Create coord dict
         coords: Dict[str, Any] = {}
 
-        # Get all images
-        img_sets = xml.findall(".//Image/Dimensions/Channels")
-
-        if len(img_sets) != 0:
-            # Select the current scene
-            img = img_sets[0]
-            if scene_index < len(img_sets):
-                img = img_sets[scene_index]
-
-            # Construct channel name list
-            scene_channel_list = []
-            channels = img.findall("./Channel")
-            number_of_channels_in_data = dims_shape[DimensionNames.Channel][1]
-
-            # There may be more channels in the metadata than in the data
-            # if so, we will just use the first N channels and log
-            # a warning to the user
-            if len(channels) > number_of_channels_in_data:
-                log.warning(
-                    "More channels in metadata than in data "
-                    f"({len(channels)} vs {number_of_channels_in_data})"
-                )
-
-            for i, channel in enumerate(channels[:number_of_channels_in_data]):
-                # Id is required, Name is not.
-                # But we prefer to use Name if it is present
-                channel_name = channel.attrib.get("Name")
-                channel_id = channel.attrib.get("Id")
-                if channel_name is None:
-                    # TODO: the next best guess is to see if there's a Name in
-                    # DisplaySetting/Channels/Channel
-                    # xpath_str = "./Metadata/DisplaySetting/Channels"
-                    # displaysetting_channels = xml.findall(xpath_str)
-                    # ds_channels = displaysetting_channels[0].findall("./Channel")
-                    # to find matching channel must match on Id attribute or if Id not
-                    # present, just on collection index i
-                    # If we didn't find a match this way, just use the Id as the name
-                    channel_name = channel_id
-                if channel_name is None:
-                    # This is actually an error because Id was required by the spec
-                    channel_name = metadata_utils.generate_ome_channel_id(
-                        str(scene_index), str(i)
-                    )
-
-                scene_channel_list.append(channel_name)
-
-            # Attach channel names to coords
+        # Attach channel names to coords
+        scene_channel_list = get_channel_names(xml, scene_index, dims_shape)
+        if scene_channel_list is not None:
             coords[DimensionNames.Channel] = scene_channel_list
 
         # Unpack short info scales
