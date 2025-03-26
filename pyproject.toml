@@ -38,7 +38,7 @@ dependencies = [
   "ome-types>=0.3.4",
   "pylibczirw",
   "requests",
-  "xarray>=0.16.1",
+  "xarray>=2022.6.0",
 ]
 
 [project.urls]
