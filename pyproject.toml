@@ -29,7 +29,7 @@ classifiers = [
 dynamic = ["version"]
 dependencies = [
   "aicspylibczi>=3.2.1",
-  "bioio-base @ git+https://github.com/bioio-devs/bioio-base.git@main",
+  "bioio-base>=1.0.5",
   "dask[array]>=2021.4.1",
   "fsspec>=2022.8.0",
   "lxml>=4.6,<5",
@@ -98,7 +98,6 @@ ignore = [
   "Justfile",
   ".cookiecutter.yaml",
   "scripts/*",
-
 ]
 
 [tool.mypy]
