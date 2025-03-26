@@ -237,6 +237,14 @@ class Reader(BaseReader):
         # E.g., shape_without_yx = (30, 2, 20)
         shape_without_yx = shape[:-2]
 
+        # Set up array size metadata
+        chunk_shape = shape[-2:]
+        if "Bgr" in pixel_types[0]:
+            # If the image is BGR, each chunk has shape (X, Y, 3)
+            chunk_shape += (3,)
+            ordered_dims.append(DimensionNames.Samples)
+
+        # Define how to get a single chunk
         def array_builder(indices: tuple[int]) -> int:
             """
             Internal helper method to get one chunk of the image data.
@@ -256,59 +264,52 @@ class Reader(BaseReader):
             ), f"Expected {len(indices)} >= {len(non_yx_dims)}."
             # E.g., plane = {'T': 0, 'C': 1, 'Z': 2}
             plane = {d: indices[i] for i, d in enumerate(non_yx_dims)}
+            scene: int | None
+            if len(scenes_bounding_rectangle) == 0:
+                # Some files have no scenes but can still be read if scene is not
+                # specified.
+                scene = None
+                roi = None
+            else:
+                # The purpose of the next 2 lines is complicated.
+                # ROI stands for Region Of Interest.
+                #
+                # In pylibczi's read method, the default ROI is the bounding
+                # rectangle of the scene **across all zoom levels**. We are going to
+                # read just the highest resolution level (zoom = 1), which is
+                # smaller than the default ROI in some cases. For example,
+                # scene 0 of the test file S=2_4x2_T=2=Z=3_CH=2.czi is 947x487 when
+                # looking at only the highest resolution, but is 948x488 when
+                # all zoom levels are considered. (I believe this is because at zoom
+                # 0.5, the result is ceiling(947/2) x ceiling(487/2).)
+                #
+                # See also: file.scenes_bounding_rectangle vs.
+                # file.scenes_bounding_rectangle_no_pyramid.
+                #
+                # Therefore, when calling read, we crop to just the ROI of the
+                # highest resolution level.
+                scene = self._current_scene_index
+                roi = scenes_bounding_rectangle[scene]
             with open(self._path) as file:
-                scene: int | None
-                if len(file.scenes_bounding_rectangle_no_pyramid) == 0:
-                    # Some files have no scenes but can still be read if scene is not
-                    # specified.
-                    scene = None
-                    roi = None
-                else:
-                    # The purpose of this next line is complicated.
-                    # ROI stands for Region Of Interest.
-                    #
-                    # In pylibczi's read method, the default ROI is the bounding
-                    # rectangle of the scene **across all zoom levels**. We are going to
-                    # read just the highest resolution level (zoom = 1), which is
-                    # smaller than the default ROI in some cases. For example,
-                    # scene 0 of the test file S=2_4x2_T=2=Z=3_CH=2.czi is 947x487 when
-                    # looking at only the highest resolution, but is 948x488 when
-                    # all zoom levels are considered. (I believe this is because at zoom
-                    # 0.5, the result is ceiling(947/2) x ceiling(487/2).)
-                    #
-                    # See also: file.scenes_bounding_rectangle vs.
-                    # file.scenes_bounding_rectangle_no_pyramid.
-                    #
-                    # Therefore, when calling read, we crop to just the ROI of the
-                    # highest resolution level.
-                    scene = self._current_scene_index
-                    roi = scenes_bounding_rectangle[scene]
                 result = file.read(scene=scene, plane=plane, roi=roi)
-                # result.shape is (Y, X, 1) or (Y, X, 3) depending on whether it's RGB
-                # or grayscale.
-                return np.squeeze(result)
+            # result.shape is (Y, X, 1) or (Y, X, 3) depending on whether it's RGB
+            # or grayscale. We want to return (Y, X) or (Y, X, 3).
+            return np.squeeze(result)
 
         # The Y and X shape of lazy_arrrays are both 1 because we are making each YX
         # slice a single chunk.
         # E.g., lazy_arrays.shape = (30, 2, 20, 1, 1)
-        lazy_arrays: np.ndarray = np.ndarray(shape_without_yx + (1, 1), dtype=object)
-        chunk_shape = shape[-2:]
-        mapped_dims = ordered_dims
-        if "Bgr" in pixel_types[0]:
-            # If the image is BGR, each chunk has shape (X, Y, 3)
-            chunk_shape += (3,)
-            mapped_dims.append(DimensionNames.Samples)
+        lazy_arrays = np.ndarray(shape_without_yx + (1, 1), dtype=object)
         for np_index, _ in np.ndenumerate(lazy_arrays):
             lazy_arrays[np_index] = da.from_delayed(
                 delayed(array_builder)(np_index),
                 chunk_shape,
                 dtype=PIXEL_DICT[pixel_types[0]],
             )
-        merged = da.block(lazy_arrays.tolist())
 
         return xr.DataArray(
-            data=merged,
-            dims=mapped_dims,
+            data=da.block(lazy_arrays.tolist()),
+            dims=ordered_dims,
             coords=coords,
             attrs={constants.METADATA_UNPROCESSED: self.metadata},
         )
