@@ -36,13 +36,15 @@ def test_subblocks(filename: str, num_subblocks: int, acquistion_time: str) -> N
     reader = Reader(
         LOCAL_RESOURCES_DIR / filename,
         include_subblock_metadata=True,
+        use_aicspylibczi=True,
     )
 
     subblocks = reader.metadata.findall("./Subblocks/Subblock")
 
     assert len(subblocks) == num_subblocks
     # Ensure one of the elements in the first subblock has expected data
-    assert subblocks[0].find(".//AcquisitionTime").text == acquistion_time
+    at_metadata: ET.Element | None = subblocks[0].find(".//AcquisitionTime")
+    assert at_metadata is not None and at_metadata.text == acquistion_time
 
 
 @pytest.mark.parametrize(
@@ -192,6 +194,7 @@ def test_czi_reader(
         expected_channel_names=expected_channel_names,
         expected_physical_pixel_sizes=expected_physical_pixel_sizes,
         expected_metadata_type=ET.Element,
+        reader_kwargs={"use_aicspylibczi": True},
     )
 
 
@@ -199,7 +202,7 @@ def test_czi_reader(
 def test_czi_reader_remote_xfail() -> None:
     # Construct full filepath
     uri = LOCAL_RESOURCES_DIR / "s_1_t_1_c_1_z_1.czi"
-    Reader(uri)
+    Reader(uri, use_aicspylibczi=True)
 
 
 # @pytest.mark.parametrize(
@@ -307,7 +310,7 @@ def test_czi_reader_mosaic_tile_inspection(
     uri = LOCAL_RESOURCES_DIR / filename
 
     # Construct reader
-    reader = Reader(uri)
+    reader = Reader(uri, use_aicspylibczi=True)
     reader.set_scene(set_scene)
 
     # Check basics
@@ -385,7 +388,7 @@ def test_czi_reader_mosaic_coords(
     uri = LOCAL_RESOURCES_DIR / filename
 
     # Construct reader
-    reader = Reader(uri)
+    reader = Reader(uri, use_aicspylibczi=True)
 
     # Check tile y and x min max
     np.testing.assert_array_equal(
