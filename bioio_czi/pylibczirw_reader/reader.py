@@ -5,14 +5,20 @@ import logging
 from typing import Any, ContextManager, Dict, Optional, Tuple
 from xml.etree import ElementTree
 
+import dask.array as da
 import numpy as np
 import xarray as xr
-from bioio_base import exceptions
+from bioio_base import constants, exceptions
 from bioio_base import io as io_utils
 from bioio_base import types
-from bioio_base.dimensions import DimensionNames, Dimensions
+from bioio_base.dimensions import (
+    DEFAULT_DIMENSION_ORDER_LIST,
+    DimensionNames,
+    Dimensions,
+)
 from bioio_base.reader import Reader as BaseReader
 from bioio_base.types import PhysicalPixelSizes
+from dask import delayed
 from fsspec.spec import AbstractFileSystem
 from pylibCZIrw import czi
 
@@ -171,7 +177,134 @@ class Reader(BaseReader):
         return coords
 
     def _read_delayed(self) -> xr.DataArray:
-        raise NotImplementedError("Wait for my next PR")
+        """
+        The delayed data array constructor for the image.
+
+        Returns
+        -------
+        data: xr.DataArray
+            The fully constructed delayed DataArray.
+
+            It is additionally recommended to closely monitor how dask array chunks are
+            managed.
+        """
+        # 1. Look up some metadata that tells us what shape the image is.
+        with open(self._path) as file:
+            total_bounding_box = file.total_bounding_box_no_pyramid
+            pixel_types = file.pixel_types
+            scenes_bounding_rectangle = file.scenes_bounding_rectangle_no_pyramid
+
+        # 2. Combine the dimension bounds from total_bounding_box (all dimensions) and
+        # scenes_bounding_rectangle (XY only) in order to compute the coordinate array
+        # for each dimension. (Think of the coordinate array as the "ticks" on an axis.)
+        dim_bounds = total_bounding_box
+        if len(scenes_bounding_rectangle) > 0:
+            assert (
+                self._current_scene_index in scenes_bounding_rectangle
+            ), f"Expected {self._current_scene_index} in {scenes_bounding_rectangle}."
+            rect = scenes_bounding_rectangle[self._current_scene_index]
+            dim_bounds[DimensionNames.SpatialX] = (rect.x, rect.x + rect.w)
+            dim_bounds[DimensionNames.SpatialY] = (rect.y, rect.y + rect.h)
+        coords = self._get_coords(self.metadata, self._current_scene_index, dim_bounds)
+
+        # 3. Figure out which dimensions are available on this image, and put them in
+        # TCZYX order as much as possible.
+        ordered_dims = [
+            d
+            for d in DEFAULT_DIMENSION_ORDER_LIST
+            if d in coords or size(total_bounding_box, d) > 1
+        ]
+        assert ordered_dims[-2:] == [DimensionNames.SpatialY, DimensionNames.SpatialX]
+        # E.g., non_yx_dims = ['T', 'C', 'Z']
+        non_yx_dims = ordered_dims[:-2]
+
+        # 4. Determine the chunk sizes and number of chunks. Each chunk is a single
+        # YX slice.
+        # E.g., shape = (30, 2, 20, 100, 100)
+        shape = tuple(
+            len(coords[d]) if d in coords else size(total_bounding_box, d)
+            for d in ordered_dims
+        )
+        # E.g., shape_without_yx = (30, 2, 20)
+        shape_without_yx = shape[:-2]
+
+        chunk_shape = shape[-2:]
+        if "Bgr" in pixel_types[0]:
+            # If the image is BGR, each chunk has shape (X, Y, 3)
+            chunk_shape += (3,)
+            ordered_dims.append(DimensionNames.Samples)
+
+        # 5. Define how to get a single chunk
+        def array_builder(indices: tuple[int]) -> int:
+            """
+            Internal helper method to get one chunk of the image data.
+
+            Example
+            -------
+            >>> file: czi.CziReader
+            >>> non_yx_dims = ['T', 'C', 'Z']
+            >>> indices = [0, 1, 2]
+            >>> array_builder(0, 1, 2) = file.read(
+            ...   scene=0,
+            ...   plane={'T': 0, 'C': 1, 'Z': 2}
+            ... )
+            """
+            assert len(indices) >= len(
+                non_yx_dims
+            ), f"Expected {len(indices)} >= {len(non_yx_dims)}."
+            # E.g., plane = {'T': 0, 'C': 1, 'Z': 2}
+            plane = {d: indices[i] for i, d in enumerate(non_yx_dims)}
+            scene: int | None
+            if len(scenes_bounding_rectangle) == 0:
+                # Some files have no scenes but can still be read if scene is not
+                # specified.
+                scene = None
+                roi = None
+            else:
+                # The purpose of the next 2 lines is complicated.
+                # ROI stands for Region Of Interest.
+                #
+                # In pylibczi's read method, the default ROI is the bounding
+                # rectangle of the scene **across all zoom levels**. We are going to
+                # read just the highest resolution level (zoom = 1), which is
+                # smaller than the default ROI in some cases. For example,
+                # scene 0 of the test file S=2_4x2_T=2=Z=3_CH=2.czi is 947x487 when
+                # looking at only the highest resolution, but is 948x488 when
+                # all zoom levels are considered. (I believe this is because at zoom
+                # 0.5, the result is ceiling(947/2) x ceiling(487/2).)
+                #
+                # See also: file.scenes_bounding_rectangle vs.
+                # file.scenes_bounding_rectangle_no_pyramid.
+                #
+                # Therefore, when calling read, we crop to just the ROI of the
+                # highest resolution level.
+                scene = self._current_scene_index
+                roi = scenes_bounding_rectangle[scene]
+            with open(self._path) as file:
+                result = file.read(scene=scene, plane=plane, roi=roi)
+            # result.shape is (Y, X, 1) or (Y, X, 3) depending on whether it's RGB
+            # or grayscale. We want to return (Y, X) or (Y, X, 3).
+            return np.squeeze(result)
+
+        # 6. Create delayed chunks
+        # The Y and X shape of lazy_arrays are both 1 because we are making each YX
+        # slice a single chunk.
+        # E.g., lazy_arrays.shape = (30, 2, 20, 1, 1)
+        lazy_arrays: np.ndarray = np.ndarray(shape_without_yx + (1, 1), dtype=object)
+        for np_index, _ in np.ndenumerate(lazy_arrays):
+            lazy_arrays[np_index] = da.from_delayed(
+                delayed(array_builder)(np_index),
+                chunk_shape,
+                dtype=PIXEL_DICT[pixel_types[0]],
+            )
+
+        # 7. Package chunks and metadata into a DataArray
+        return xr.DataArray(
+            data=da.block(lazy_arrays.tolist()),
+            dims=ordered_dims,
+            coords=coords,
+            attrs={constants.METADATA_UNPROCESSED: self.metadata},
+        )
 
     def _read_immediate(self) -> xr.DataArray:
         """
