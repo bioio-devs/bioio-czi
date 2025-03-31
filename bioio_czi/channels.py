@@ -3,7 +3,9 @@ from typing import Any, Dict, Optional
 
 from bioio_base.dimensions import DimensionNames
 
-from .metadata_ome import BoundingBox, Metadata, generate_ome_channel_id
+from bioio_czi.bounding_box import size
+
+from .metadata_ome import Metadata, generate_ome_channel_id
 
 log = logging.getLogger(__name__)
 
@@ -60,13 +62,3 @@ def get_channel_names(
 
         scene_channel_list.append(channel_name)
     return scene_channel_list
-
-
-def size(bounding_box: BoundingBox, dim: str) -> int:
-    """
-    Return the size of the dimension if it is in the bounding box, otherwise -1.
-    """
-    if dim not in bounding_box:
-        return -1
-    bounds = bounding_box[dim]
-    return bounds[1] - bounds[0]

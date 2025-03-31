@@ -27,7 +27,8 @@ from fsspec.implementations.local import LocalFileSystem
 from fsspec.spec import AbstractFileSystem
 
 from .. import metadata_ome as metadata_utils
-from ..channels import get_channel_names, size
+from ..bounding_box import size
+from ..channels import get_channel_names
 from ..pixel_sizes import get_physical_pixel_sizes
 
 ###############################################################################
