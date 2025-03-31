@@ -54,8 +54,15 @@ print(img.shape)  # (1, 1, 1, 5684, 5925)
 
 ### Individual tiles with aicspylibczi
 ```python
-img = BioImage("S=2_4x2_T=2=Z=3_CH=2.czi", reconstruct_mosaic=False, use_aicspylibczi=True)
+img = BioImage(
+    "S=2_4x2_T=2=Z=3_CH=2.czi",
+    reconstruct_mosaic=False,
+    include_subblock_metadata=True,
+    use_aicspylibczi=True
+)
 print(img.dims)  # <Dimensions [M: 8, T: 2, C: 2, Z: 3, Y: 256, X: 256]>
+subblocks = img.metadata.findall("./Subblocks/Subblock")
+print(len(subblocks))  # 192
 ```
 The `M` dimension is used to select a specific tile.
 
