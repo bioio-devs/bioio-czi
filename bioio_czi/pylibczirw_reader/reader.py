@@ -37,7 +37,7 @@ PIXEL_DICT = {
 
 class Reader(BaseReader):
     """
-    Wraps the aicspylibczi API to provide the same BioIO Reader plugin for
+    Wraps the pylibczirw API to provide the same BioIO Reader plugin for
     volumetric Zeiss CZI images.
 
     Parameters
