@@ -1,6 +1,6 @@
 from bioio_base.types import PhysicalPixelSizes
 
-from .metadata_ome import Metadata, UnsupportedMetadataError
+from .metadata import Metadata, UnsupportedMetadataError
 
 
 def get_physical_pixel_sizes(metadata: Metadata) -> PhysicalPixelSizes:

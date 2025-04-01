@@ -5,7 +5,7 @@ from bioio_base.dimensions import DimensionNames
 
 from bioio_czi.bounding_box import size
 
-from .metadata_ome import Metadata, generate_ome_channel_id
+from .metadata import Metadata, generate_ome_channel_id
 
 log = logging.getLogger(__name__)
 
