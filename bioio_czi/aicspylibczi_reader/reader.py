@@ -26,7 +26,10 @@ from dask import delayed
 from fsspec.implementations.local import LocalFileSystem
 from fsspec.spec import AbstractFileSystem
 
-from .. import utils as metadata_utils
+from .. import metadata as metadata_utils
+from ..bounding_box import size
+from ..channels import get_channel_names
+from ..pixel_sizes import get_physical_pixel_sizes
 
 ###############################################################################
 
@@ -556,94 +559,17 @@ class Reader(BaseReader):
         # Create coord dict
         coords: Dict[str, Any] = {}
 
-        # Get all images
-        img_sets = xml.findall(".//Image/Dimensions/Channels")
-
-        if len(img_sets) != 0:
-            # Select the current scene
-            img = img_sets[0]
-            if scene_index < len(img_sets):
-                img = img_sets[scene_index]
-
-            # Construct channel name list
-            scene_channel_list = []
-            channels = img.findall("./Channel")
-            number_of_channels_in_data = dims_shape[DimensionNames.Channel][1]
-
-            # There may be more channels in the metadata than in the data
-            # if so, we will just use the first N channels and log
-            # a warning to the user
-            if len(channels) > number_of_channels_in_data:
-                log.warning(
-                    "More channels in metadata than in data "
-                    f"({len(channels)} vs {number_of_channels_in_data})"
-                )
-
-            for i, channel in enumerate(channels[:number_of_channels_in_data]):
-                # Id is required, Name is not.
-                # But we prefer to use Name if it is present
-                channel_name = channel.attrib.get("Name")
-                channel_id = channel.attrib.get("Id")
-                if channel_name is None:
-                    # TODO: the next best guess is to see if there's a Name in
-                    # DisplaySetting/Channels/Channel
-                    # xpath_str = "./Metadata/DisplaySetting/Channels"
-                    # displaysetting_channels = xml.findall(xpath_str)
-                    # ds_channels = displaysetting_channels[0].findall("./Channel")
-                    # to find matching channel must match on Id attribute or if Id not
-                    # present, just on collection index i
-                    # If we didn't find a match this way, just use the Id as the name
-                    channel_name = channel_id
-                if channel_name is None:
-                    # This is actually an error because Id was required by the spec
-                    channel_name = metadata_utils.generate_ome_channel_id(
-                        str(scene_index), str(i)
-                    )
-
-                scene_channel_list.append(channel_name)
-
-            # Attach channel names to coords
+        # Attach channel names to coords
+        scene_channel_list = get_channel_names(xml, scene_index, dims_shape)
+        if scene_channel_list is not None:
             coords[DimensionNames.Channel] = scene_channel_list
 
-        # Unpack short info scales
-        list_xs = xml.findall(".//Distance[@Id='X']")
-        list_ys = xml.findall(".//Distance[@Id='Y']")
-        list_zs = xml.findall(".//Distance[@Id='Z']")
-        scale_xe = list_xs[0].find("./Value")
-        scale_ye = list_ys[0].find("./Value")
-        scale_ze = None if len(list_zs) == 0 else list_zs[0].find("./Value")
-
-        # Set default scales
-        scale_x = None
-        scale_y = None
-        scale_z = None
-
-        # Unpack the string value to a float
-        # the values are stored in units of meters always in .czi, so
-        # divide by 1E-6 to convert to microns
-        if scale_xe is not None and scale_xe.text is not None:
-            scale_x = float(scale_xe.text) / (1e-6)
-        if scale_ye is not None and scale_ye.text is not None:
-            scale_y = float(scale_ye.text) / (1e-6)
-        if scale_ze is not None and scale_ze.text is not None:
-            scale_z = float(scale_ze.text) / (1e-6)
-
         # Handle Spatial Dimensions
-        for scale, dim_name in [
-            (scale_z, DimensionNames.SpatialZ),
-            (scale_y, DimensionNames.SpatialY),
-            (scale_x, DimensionNames.SpatialX),
-        ]:
+        px_sizes = get_physical_pixel_sizes(xml)
+        for dim_name, scale in px_sizes._asdict().items():
             if scale is not None and dim_name in dims_shape:
-                dim_size = dims_shape[dim_name][1] - dims_shape[dim_name][0]
+                dim_size = size(dims_shape, dim_name)
                 coords[dim_name] = Reader._generate_coord_array(0, dim_size, scale)
-
-        # Time
-        # TODO: unpack "TimeSpan" elements
-        # I can find a single "TimeSpan" in our data but unsure how multi-scene handles
-
-        # Create physical pixel sizes
-        px_sizes = types.PhysicalPixelSizes(scale_z, scale_y, scale_x)
 
         return coords, px_sizes
 
