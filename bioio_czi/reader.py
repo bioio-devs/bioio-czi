@@ -24,6 +24,7 @@ from bioio_base.dimensions import (
     Dimensions,
 )
 from bioio_base.reader import Reader as BaseReader
+from bioio_base.standard_metadata import StandardMetadata
 from dask import delayed
 from fsspec.implementations.local import LocalFileSystem
 from fsspec.spec import AbstractFileSystem
@@ -1213,7 +1214,7 @@ class Reader(BaseReader):
         return None
 
     @property
-    def timelapse_interval(self) -> Optional[int]:
+    def time_interval(self) -> types.TimeInterval:
         """
         Extracts the time interval between the first two time points in milliseconds.
 
@@ -1254,9 +1255,7 @@ class Reader(BaseReader):
                         acquisition_time_of_second_subblock
                         - acquisition_time_of_first_subblock
                     )
-                    return int(
-                        round(delta.total_seconds(), 0) * 1000
-                    )  # Convert to milliseconds
+                    return round(delta.total_seconds(), 0) * 1000
 
         except Exception as exc:
             log.warning("Failed to extract Timelapse Interval: %s", exc, exc_info=True)
@@ -1320,3 +1319,19 @@ class Reader(BaseReader):
             log.warning("Failed to extract Total Time Duration: %s", exc, exc_info=True)
 
         return None
+
+    @property
+    def standard_metadata(self) -> StandardMetadata:
+        """
+        Return the standard metadata for this reader, updating specific fields.
+
+        This implementation calls the base reader’s standard_metadata property
+        via super() and then assigns the new values.
+        """
+        metadata = super().standard_metadata
+        metadata.acquisition_date = self.acquisition_date
+        metadata.binning = self.binning
+        metadata.imaged_by = self.imaged_by
+        metadata.objective = self.objective
+        metadata.total_time_duration = self.total_time_duration
+        return metadata
