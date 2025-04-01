@@ -1,9 +1,11 @@
+from xml.etree import ElementTree as ET
+
 from bioio_base.types import PhysicalPixelSizes
 
-from .metadata_ome import Metadata, UnsupportedMetadataError
+from .metadata import UnsupportedMetadataError
 
 
-def get_physical_pixel_sizes(metadata: Metadata) -> PhysicalPixelSizes:
+def get_physical_pixel_sizes(metadata: ET.Element) -> PhysicalPixelSizes:
     """
     Look up pixel sizes for X, Y, and Z dimensions from a CZI's XML.
     """
@@ -15,7 +17,7 @@ def get_physical_pixel_sizes(metadata: Metadata) -> PhysicalPixelSizes:
 
 
 def _single_physical_pixel_size(
-    metadata: Metadata, dimension: str, allow_none: bool = False
+    metadata: ET.Element, dimension: str, allow_none: bool = False
 ) -> float | None:
     """
     Look up physical pixel size for one dimension.

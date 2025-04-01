@@ -1,22 +1,25 @@
 import logging
 from typing import Any, Dict, Optional
+from xml.etree import ElementTree as ET
 
 from bioio_base.dimensions import DimensionNames
 
-from .metadata_ome import BoundingBox, Metadata, generate_ome_channel_id
+from bioio_czi.bounding_box import size
+
+from .metadata import generate_ome_channel_id
 
 log = logging.getLogger(__name__)
 
 
 def get_channel_names(
-    xml: Metadata, scene_index: int, dims_shape: Dict[str, Any]
+    xml: ET.Element, scene_index: int, dims_shape: Dict[str, Any]
 ) -> Optional[list[str]]:
     """
     Get the channel names for the given scene index.
 
     Parameters
     ----------
-    metadata: Metadata
+    metadata: xml.etree.ElementTree.Element
         The metadata to search for channel names.
     scene_index: int
     """
@@ -60,13 +63,3 @@ def get_channel_names(
 
         scene_channel_list.append(channel_name)
     return scene_channel_list
-
-
-def size(bounding_box: BoundingBox, dim: str) -> int:
-    """
-    Return the size of the dimension if it is in the bounding box, otherwise -1.
-    """
-    if dim not in bounding_box:
-        return -1
-    bounds = bounding_box[dim]
-    return bounds[1] - bounds[0]
