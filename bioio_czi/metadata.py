@@ -7,8 +7,6 @@ import lxml.etree
 from bioio_base.types import PathLike
 from ome_types import OME
 
-Metadata = ET.Element
-
 
 class UnsupportedMetadataError(Exception):
     """

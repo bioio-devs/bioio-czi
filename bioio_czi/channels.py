@@ -1,24 +1,25 @@
 import logging
 from typing import Any, Dict, Optional
+from xml.etree import ElementTree as ET
 
 from bioio_base.dimensions import DimensionNames
 
 from bioio_czi.bounding_box import size
 
-from .metadata import Metadata, generate_ome_channel_id
+from .metadata import generate_ome_channel_id
 
 log = logging.getLogger(__name__)
 
 
 def get_channel_names(
-    xml: Metadata, scene_index: int, dims_shape: Dict[str, Any]
+    xml: ET.Element, scene_index: int, dims_shape: Dict[str, Any]
 ) -> Optional[list[str]]:
     """
     Get the channel names for the given scene index.
 
     Parameters
     ----------
-    metadata: Metadata
+    metadata: xml.etree.ElementTree.Element
         The metadata to search for channel names.
     scene_index: int
     """
