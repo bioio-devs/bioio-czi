@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import logging
-from typing import Any, ContextManager, Dict, Optional, Tuple
+from typing import Any, Callable, ContextManager, Dict, Optional, Tuple
 from xml.etree import ElementTree as ET
 
 import dask.array as da
@@ -178,79 +178,35 @@ class Reader(BaseReader):
 
         return coords
 
-    def _read_delayed(self) -> xr.DataArray:
+    def _array_builder(self, index_dims: list[str]) -> Callable[[tuple[int]], int]:
         """
-        The delayed data array constructor for the image.
+        Internal helper method to get one chunk of the image data.
+
+        Parameters
+        ----------
+        index_dims: list[str]
+            The names of the dimensions that will be used to select a chunk.
 
         Returns
         -------
-        data: xr.DataArray
-            The fully constructed delayed DataArray.
+        array_builder: Callable[[tuple[int]], int]
+            Function of one parameter indices: tuple[int] that defines the chunk.
+            indices must be the same length as index_dims, and in the same order.
 
-            It is additionally recommended to closely monitor how dask array chunks are
-            managed.
+        Example
+        -------
+        >>> self._array_builder(['T', 'C', 'Z', 'Y', 'X'])((0, 1, 2)) = file.read(
+        ...   scene=0,
+        ...   plane={'T': 0, 'C': 1, 'Z': 2}
+        ... )
         """
-        # 2. Combine the dimension bounds from total_bounding_box (all dimensions) and
-        # scenes_bounding_rectangle (XY only) in order to compute the coordinate array
-        # for each dimension. (Think of the coordinate array as the "ticks" on an axis.)
-        dim_bounds = self._total_bounding_box
-        if len(self._scenes_bounding_rectangle) > 0:
-            assert self._current_scene_index in self._scenes_bounding_rectangle, (
-                f"Expected {self._current_scene_index} to be in "
-                f"{self._scenes_bounding_rectangle}."
-            )
-            rect = self._scenes_bounding_rectangle[self._current_scene_index]
-            dim_bounds[DimensionNames.SpatialX] = (rect.x, rect.x + rect.w)
-            dim_bounds[DimensionNames.SpatialY] = (rect.y, rect.y + rect.h)
-        coords = self._get_coords(self.metadata, self._current_scene_index, dim_bounds)
 
-        # 3. Figure out which dimensions are available on this image, and put them in
-        # TCZYX order as much as possible.
-        ordered_dims = [
-            d
-            for d in DEFAULT_DIMENSION_ORDER_LIST
-            if d in coords or size(self._total_bounding_box, d) > 1
-        ]
-        assert ordered_dims[-2:] == [DimensionNames.SpatialY, DimensionNames.SpatialX]
-        # E.g., non_yx_dims = ['T', 'C', 'Z']
-        non_yx_dims = ordered_dims[:-2]
-
-        # 4. Determine the chunk sizes and number of chunks. Each chunk is a single
-        # YX slice.
-        # E.g., shape = (30, 2, 20, 100, 100)
-        shape = tuple(
-            len(coords[d]) if d in coords else size(self._total_bounding_box, d)
-            for d in ordered_dims
-        )
-        # E.g., shape_without_yx = (30, 2, 20)
-        shape_without_yx = shape[:-2]
-
-        chunk_shape = shape[-2:]
-        if "Bgr" in self._pixel_types[0]:
-            # If the image is BGR, each chunk has shape (X, Y, 3)
-            chunk_shape += (3,)
-            ordered_dims.append(DimensionNames.Samples)
-
-        # 5. Define how to get a single chunk
         def array_builder(indices: tuple[int]) -> int:
-            """
-            Internal helper method to get one chunk of the image data.
-
-            Example
-            -------
-            >>> file: czi.CziReader
-            >>> non_yx_dims = ['T', 'C', 'Z']
-            >>> indices = [0, 1, 2]
-            >>> array_builder(0, 1, 2) = file.read(
-            ...   scene=0,
-            ...   plane={'T': 0, 'C': 1, 'Z': 2}
-            ... )
-            """
             assert len(indices) >= len(
-                non_yx_dims
-            ), f"Expected {len(indices)} >= {len(non_yx_dims)}."
+                index_dims
+            ), f"Expected {len(indices)} >= {len(index_dims)}."
             # E.g., plane = {'T': 0, 'C': 1, 'Z': 2}
-            plane = {d: indices[i] for i, d in enumerate(non_yx_dims)}
+            plane = {d: indices[i] for i, d in enumerate(index_dims)}
             scene: int | None
             if len(self._scenes_bounding_rectangle) == 0:
                 # Some files have no scenes but can still be read if scene is not
@@ -283,19 +239,74 @@ class Reader(BaseReader):
             # or grayscale. We want to return (Y, X) or (Y, X, 3).
             return np.squeeze(result)
 
-        # 6. Create delayed chunks
+        return array_builder
+
+    def _read_delayed(self) -> xr.DataArray:
+        """
+        The delayed data array constructor for the image.
+
+        Returns
+        -------
+        data: xr.DataArray
+            The fully constructed delayed DataArray.
+
+            It is additionally recommended to closely monitor how dask array chunks are
+            managed.
+        """
+        # 1. Combine the dimension bounds from total_bounding_box (all dimensions) and
+        # scenes_bounding_rectangle (XY only) in order to compute the coordinate array
+        # for each dimension. (Think of the coordinate array as the "ticks" on an axis.)
+        dim_bounds = self._total_bounding_box
+        if len(self._scenes_bounding_rectangle) > 0:
+            assert self._current_scene_index in self._scenes_bounding_rectangle, (
+                f"Expected {self._current_scene_index} to be in "
+                f"{self._scenes_bounding_rectangle}."
+            )
+            rect = self._scenes_bounding_rectangle[self._current_scene_index]
+            dim_bounds[DimensionNames.SpatialX] = (rect.x, rect.x + rect.w)
+            dim_bounds[DimensionNames.SpatialY] = (rect.y, rect.y + rect.h)
+        coords = self._get_coords(self.metadata, self._current_scene_index, dim_bounds)
+
+        # 2. Figure out which dimensions are available on this image, and put them in
+        # TCZYX order as much as possible.
+        ordered_dims = [
+            d
+            for d in DEFAULT_DIMENSION_ORDER_LIST
+            if d in coords or size(self._total_bounding_box, d) > 1
+        ]
+        assert ordered_dims[-2:] == [DimensionNames.SpatialY, DimensionNames.SpatialX]
+        # E.g., non_yx_dims = ['T', 'C', 'Z']
+        non_yx_dims = ordered_dims[:-2]
+
+        # 4. Determine the chunk sizes and number of chunks. Each chunk is a single
+        # YX slice.
+        # E.g., shape = (30, 2, 20, 100, 100)
+        shape = tuple(
+            len(coords[d]) if d in coords else size(self._total_bounding_box, d)
+            for d in ordered_dims
+        )
+        # E.g., shape_without_yx = (30, 2, 20)
+        shape_without_yx = shape[:-2]
+
+        chunk_shape = shape[-2:]
+        if "Bgr" in self._pixel_types[0]:
+            # If the image is BGR, each chunk has shape (X, Y, 3)
+            chunk_shape += (3,)
+            ordered_dims.append(DimensionNames.Samples)
+
+        # 5. Create delayed chunks
         # The Y and X shape of lazy_arrays are both 1 because we are making each YX
         # slice a single chunk.
         # E.g., lazy_arrays.shape = (30, 2, 20, 1, 1)
         lazy_arrays: np.ndarray = np.ndarray(shape_without_yx + (1, 1), dtype=object)
         for np_index, _ in np.ndenumerate(lazy_arrays):
             lazy_arrays[np_index] = da.from_delayed(
-                delayed(array_builder)(np_index),
+                delayed(self._array_builder(non_yx_dims))(np_index),
                 chunk_shape,
                 dtype=PIXEL_DICT[self._pixel_types[0]],
             )
 
-        # 7. Package chunks and metadata into a DataArray
+        # 6. Package chunks and metadata into a DataArray
         return xr.DataArray(
             data=da.block(lazy_arrays.tolist()),
             dims=ordered_dims,
