@@ -1100,7 +1100,7 @@ class Reader(BaseReader):
         return None
 
     @property
-    def acquisition_date(self) -> Optional[str]:
+    def imaging_date(self) -> Optional[str]:
         """
         Extracts the acquisition date from the OME metadata.
 
@@ -1321,6 +1321,88 @@ class Reader(BaseReader):
         return None
 
     @property
+    def row(self) -> Optional[str]:
+        """
+        Extracts the well row index for the current scene.
+
+        Returns
+        -------
+        Optional[str]
+            The row index as a string. Returns None if not found.
+        """
+        try:
+            scenes = self.metadata.findall(
+                "Metadata/Information/Image/Dimensions/S/Scenes/Scene"
+            )
+            for scene in scenes:
+                if int(scene.get("Index")) == self.current_scene_index:
+                    shape = scene.find("Shape")
+                    if shape is not None:
+                        row = shape.find("RowIndex")
+                        if row is not None:
+                            return row.text
+        except Exception as exc:
+            log.warning("Failed to extract well row index: %s", exc, exc_info=True)
+
+        return None
+
+    @property
+    def column(self) -> Optional[str]:
+        """
+        Extracts the well column index for the current scene.
+
+        Returns
+        -------
+        Optional[str]
+            The column index as a string. Returns None if not found.
+        """
+        try:
+            scenes = self.metadata.findall(
+                "Metadata/Information/Image/Dimensions/S/Scenes/Scene"
+            )
+            for scene in scenes:
+                if int(scene.get("Index")) == self.current_scene_index:
+                    shape = scene.find("Shape")
+                    if shape is not None:
+                        col = shape.find("ColumnIndex")
+                        if col is not None:
+                            return col.text
+        except Exception as exc:
+            log.warning("Failed to extract well column index: %s", exc, exc_info=True)
+
+        return None
+
+    @property
+    def position_index(self) -> Optional[int]:
+        """
+        Extracts the numeric position index from the current scene name.
+
+        Returns
+        -------
+        Optional[int]
+            The numeric part of the scene name.
+            Returns None if parsing fails.
+        """
+        try:
+            scene_name = self.scenes[self.current_scene_index]
+            # Use only the first part before a "-" if present
+            prefix = scene_name.split("-")[0]
+            return int(prefix[1:])
+        except (IndexError, ValueError) as exc:
+            log.warning(
+                "Failed to parse position index from scene name '%s': %s",
+                scene_name,
+                exc,
+                exc_info=True,
+            )
+        except Exception as exc:
+            log.warning(
+                "Unexpected error parsing position index: %s", exc, exc_info=True
+            )
+
+        return None
+
+    @property
     def standard_metadata(self) -> StandardMetadata:
         """
         Return the standard metadata for this reader, updating specific fields.
@@ -1329,9 +1411,12 @@ class Reader(BaseReader):
         via super() and then assigns the new values.
         """
         metadata = super().standard_metadata
-        metadata.acquisition_date = self.acquisition_date
         metadata.binning = self.binning
+        metadata.column = self.column
         metadata.imaged_by = self.imaged_by
+        metadata.imaging_date = self.imaging_date
         metadata.objective = self.objective
+        metadata.position_index = self.position_index
+        metadata.row = self.row
         metadata.total_time_duration = self.total_time_duration
         return metadata
