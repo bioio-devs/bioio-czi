@@ -195,7 +195,7 @@ class Reader(BaseReader):
 
         Example
         -------
-        >>> self._array_builder(['T', 'C', 'Z', 'Y', 'X'])((0, 1, 2)) = file.read(
+        >>> self._array_builder(['T', 'C', 'Z'])((0, 1, 2)) = file.read(
         ...   scene=0,
         ...   plane={'T': 0, 'C': 1, 'Z': 2}
         ... )
