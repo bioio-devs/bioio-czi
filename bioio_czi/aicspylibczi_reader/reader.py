@@ -83,17 +83,12 @@ class Reader(BaseReader):
 
     @staticmethod
     def _is_supported_image(fs: AbstractFileSystem, path: str, **kwargs: Any) -> bool:
+        if not isinstance(fs, LocalFileSystem):
+            return False
         try:
-            if not isinstance(fs, LocalFileSystem):
-                raise ValueError(
-                    f"Cannot read CZIs from non-local file system. "
-                    f"Received URI: {path}, which points to {type(fs)}."
-                )
-
             with fs.open(path) as open_resource:
                 CziFile(open_resource.f)
                 return True
-
         except RuntimeError:
             return False
 
@@ -131,9 +126,10 @@ class Reader(BaseReader):
 
         # Catch non-local file system
         if not isinstance(self._fs, LocalFileSystem):
-            raise ValueError(
-                f"Cannot read CZIs from non-local file system. "
-                f"Received URI: {self._path}, which points to {type(self._fs)}."
+            raise exceptions.UnsupportedFileFormatError(
+                "bioio-czi[aicspylibczi mode]",
+                self._path,
+                "Try not setting use_aicspylibczi?",
             )
 
         # Store params
