@@ -198,10 +198,16 @@ def test_czi_reader(
     )
 
 
-@pytest.mark.xfail(reason="Do no support remote CZI reading yet")
+@pytest.mark.xfail(
+    raises=exceptions.UnsupportedFileFormatError,
+    reason="Do no support remote CZI reading in aicspylibczi mode",
+)
 def test_czi_reader_remote_xfail() -> None:
     # Construct full filepath
-    uri = LOCAL_RESOURCES_DIR / "s_1_t_1_c_1_z_1.czi"
+    uri = (
+        "https://allencell.s3.amazonaws.com/aics/hipsc_12x_overview_image_dataset/"
+        "stitchedwelloverviewimagepath/05080558_3500003720_10X_20191220_D3.czi"
+    )
     Reader(uri, use_aicspylibczi=True)
 
 
