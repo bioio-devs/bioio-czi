@@ -51,6 +51,7 @@ path = (
 img = BioImage(path)
 print(img.shape)  # (1, 1, 1, 5684, 5925)
 ```
+Note: accessing files from the internet is not available in `aicspylibczi` mode.
 
 ### Individual tiles with aicspylibczi
 ```python
