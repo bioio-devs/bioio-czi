@@ -63,6 +63,7 @@ img = BioImage(
 print(img.dims)  # <Dimensions [M: 8, T: 2, C: 2, Z: 3, Y: 256, X: 256]>
 subblocks = img.metadata.findall("./Subblocks/Subblock")
 print(len(subblocks))  # 192
+print(img.get_image_data("TCZYX", M=3).shape)  # (2, 2, 3, 256, 256)
 ```
 The `M` dimension is used to select a specific tile.
 
