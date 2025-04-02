@@ -3,7 +3,7 @@
 
 import logging
 from typing import Any, ContextManager, Dict, Optional, Tuple
-from xml.etree import ElementTree
+from xml.etree import ElementTree as ET
 
 import dask.array as da
 import numpy as np
@@ -22,9 +22,9 @@ from dask import delayed
 from fsspec.spec import AbstractFileSystem
 from pylibCZIrw import czi
 
-from .. import metadata_ome
+from .. import metadata
 from ..channels import get_channel_names, size
-from ..metadata_ome import Metadata, UnsupportedMetadataError
+from ..metadata import UnsupportedMetadataError
 from ..pixel_sizes import get_physical_pixel_sizes
 
 log = logging.getLogger(__name__)
@@ -43,7 +43,7 @@ PIXEL_DICT = {
 
 class Reader(BaseReader):
     """
-    Wraps the aicspylibczi API to provide the same BioIO Reader plugin for
+    Wraps the pylibczirw API to provide the same BioIO Reader plugin for
     volumetric Zeiss CZI images.
 
     Parameters
@@ -58,7 +58,7 @@ class Reader(BaseReader):
     _xarray_dask_data: Optional["xr.DataArray"] = None
     _xarray_data: Optional["xr.DataArray"] = None
     _dims: Optional[Dimensions] = None
-    _metadata: Optional[Metadata] = None
+    _metadata: Optional[ET.Element] = None
     _scenes: Optional[Tuple[str, ...]] = None
     _current_scene_index: int = 0
     _fs: "AbstractFileSystem"
@@ -124,7 +124,7 @@ class Reader(BaseReader):
         >>> for i in range(len(image.scenes))
         """
 
-        def scene_name(metadata: Metadata, scene_index: int) -> str:
+        def scene_name(metadata: ET.Element, scene_index: int) -> str:
             scene_info = metadata.findall(
                 "./Metadata/Information/Image/Dimensions/"
                 f"S/Scenes/Scene[@Index='{scene_index}']"
@@ -147,12 +147,12 @@ class Reader(BaseReader):
                 self._scenes = tuple(scene_name(self.metadata, i) for i in scene_ids)
                 if len(self._scenes) < 1:
                     # If there are no scenes, use the default scene ID
-                    self._scenes = (metadata_ome.generate_ome_image_id(0),)
+                    self._scenes = (metadata.generate_ome_image_id(0),)
 
         return self._scenes
 
     def _get_coords(
-        self, xml: Metadata, scene_index: int, dims_shape: Dict[str, Any]
+        self, xml: ET.Element, scene_index: int, dims_shape: Dict[str, Any]
     ) -> Dict[str, list | np.ndarray]:
         """
         Generate coordinate arrays for channel dimension ("C") and spatial dimensions
@@ -370,7 +370,7 @@ class Reader(BaseReader):
         return self.xarray_data
 
     @property
-    def metadata(self) -> Metadata:
+    def metadata(self) -> ET.Element:
         """
         Returns
         -------
@@ -392,7 +392,7 @@ class Reader(BaseReader):
         """
         if self._metadata is None:
             with open(self._path) as file:
-                self._metadata = ElementTree.fromstring(file.raw_metadata)
+                self._metadata = ET.fromstring(file.raw_metadata)
         return self._metadata
 
     @property
