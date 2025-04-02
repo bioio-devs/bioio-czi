@@ -12,7 +12,7 @@ A BioIO reader plugin for reading CZIs using `pylibczirw` or `aicspylibczi`
 
 ## Documentation
 
-[See the generic bioio documentation on our GitHub pages site](https://bioio-devs.github.io/bioio/OVERVIEW.html) - the generic use and installation instructions there will work for this package.
+[See the bioio documentation on our GitHub pages site](https://bioio-devs.github.io/bioio/OVERVIEW.html) - the general use and installation instructions there will work for this package.
 
 Information about the base reader this package relies on can be found in the `bioio-base` repository [here](https://github.com/bioio-devs/bioio-base).
 
