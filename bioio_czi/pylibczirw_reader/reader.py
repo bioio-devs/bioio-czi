@@ -8,9 +8,7 @@ from xml.etree import ElementTree as ET
 import dask.array as da
 import numpy as np
 import xarray as xr
-from bioio_base import constants, exceptions
-from bioio_base import io as io_utils
-from bioio_base import types
+from bioio_base import constants, exceptions, types
 from bioio_base.dimensions import (
     DEFAULT_DIMENSION_ORDER_LIST,
     DimensionNames,
@@ -94,14 +92,18 @@ class Reader(BaseReader):
             return False
 
     def __init__(self, image: types.PathLike, fs_kwargs: Dict[str, Any] = {}) -> None:
-        self._fs, self._path = io_utils.pathlike_to_fs(
-            image, enforce_exists=True, fs_kwargs=fs_kwargs
-        )
-
-        if not self._is_supported_image(self._fs, self._path):
-            raise exceptions.UnsupportedFileFormatError(
-                self.__class__.__name__, self._path
-            )
+        path = str(image)
+        try:
+            with open(path) as file:
+                self._fs = None  # Unused but required by tests
+                self._path = path
+                self._total_bounding_box = file.total_bounding_box_no_pyramid
+                self._pixel_types = file.pixel_types
+                self._scenes_bounding_rectangle = (
+                    file.scenes_bounding_rectangle_no_pyramid
+                )
+        except RuntimeError:
+            raise exceptions.UnsupportedFileFormatError(self.__class__.__name__, path)
 
     @property
     def scenes(self) -> Tuple[str, ...]:
@@ -188,21 +190,16 @@ class Reader(BaseReader):
             It is additionally recommended to closely monitor how dask array chunks are
             managed.
         """
-        # 1. Look up some metadata that tells us what shape the image is.
-        with open(self._path) as file:
-            total_bounding_box = file.total_bounding_box_no_pyramid
-            pixel_types = file.pixel_types
-            scenes_bounding_rectangle = file.scenes_bounding_rectangle_no_pyramid
-
         # 2. Combine the dimension bounds from total_bounding_box (all dimensions) and
         # scenes_bounding_rectangle (XY only) in order to compute the coordinate array
         # for each dimension. (Think of the coordinate array as the "ticks" on an axis.)
-        dim_bounds = total_bounding_box
-        if len(scenes_bounding_rectangle) > 0:
-            assert (
-                self._current_scene_index in scenes_bounding_rectangle
-            ), f"Expected {self._current_scene_index} in {scenes_bounding_rectangle}."
-            rect = scenes_bounding_rectangle[self._current_scene_index]
+        dim_bounds = self._total_bounding_box
+        if len(self._scenes_bounding_rectangle) > 0:
+            assert self._current_scene_index in self._scenes_bounding_rectangle, (
+                f"Expected {self._current_scene_index} to be in "
+                f"{self._scenes_bounding_rectangle}."
+            )
+            rect = self._scenes_bounding_rectangle[self._current_scene_index]
             dim_bounds[DimensionNames.SpatialX] = (rect.x, rect.x + rect.w)
             dim_bounds[DimensionNames.SpatialY] = (rect.y, rect.y + rect.h)
         coords = self._get_coords(self.metadata, self._current_scene_index, dim_bounds)
@@ -212,7 +209,7 @@ class Reader(BaseReader):
         ordered_dims = [
             d
             for d in DEFAULT_DIMENSION_ORDER_LIST
-            if d in coords or size(total_bounding_box, d) > 1
+            if d in coords or size(self._total_bounding_box, d) > 1
         ]
         assert ordered_dims[-2:] == [DimensionNames.SpatialY, DimensionNames.SpatialX]
         # E.g., non_yx_dims = ['T', 'C', 'Z']
@@ -222,14 +219,14 @@ class Reader(BaseReader):
         # YX slice.
         # E.g., shape = (30, 2, 20, 100, 100)
         shape = tuple(
-            len(coords[d]) if d in coords else size(total_bounding_box, d)
+            len(coords[d]) if d in coords else size(self._total_bounding_box, d)
             for d in ordered_dims
         )
         # E.g., shape_without_yx = (30, 2, 20)
         shape_without_yx = shape[:-2]
 
         chunk_shape = shape[-2:]
-        if "Bgr" in pixel_types[0]:
+        if "Bgr" in self._pixel_types[0]:
             # If the image is BGR, each chunk has shape (X, Y, 3)
             chunk_shape += (3,)
             ordered_dims.append(DimensionNames.Samples)
@@ -255,7 +252,7 @@ class Reader(BaseReader):
             # E.g., plane = {'T': 0, 'C': 1, 'Z': 2}
             plane = {d: indices[i] for i, d in enumerate(non_yx_dims)}
             scene: int | None
-            if len(scenes_bounding_rectangle) == 0:
+            if len(self._scenes_bounding_rectangle) == 0:
                 # Some files have no scenes but can still be read if scene is not
                 # specified.
                 scene = None
@@ -279,7 +276,7 @@ class Reader(BaseReader):
                 # Therefore, when calling read, we crop to just the ROI of the
                 # highest resolution level.
                 scene = self._current_scene_index
-                roi = scenes_bounding_rectangle[scene]
+                roi = self._scenes_bounding_rectangle[scene]
             with open(self._path) as file:
                 result = file.read(scene=scene, plane=plane, roi=roi)
             # result.shape is (Y, X, 1) or (Y, X, 3) depending on whether it's RGB
@@ -295,7 +292,7 @@ class Reader(BaseReader):
             lazy_arrays[np_index] = da.from_delayed(
                 delayed(array_builder)(np_index),
                 chunk_shape,
-                dtype=PIXEL_DICT[pixel_types[0]],
+                dtype=PIXEL_DICT[self._pixel_types[0]],
             )
 
         # 7. Package chunks and metadata into a DataArray
