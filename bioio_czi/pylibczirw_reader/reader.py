@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import logging
-from typing import Any, Callable, ContextManager, Dict, Optional, Tuple
+from typing import Any, Callable, ContextManager, Dict, Optional, Tuple, Union
 from xml.etree import ElementTree as ET
 
 import dask.array as da
@@ -155,7 +155,7 @@ class Reader(BaseReader):
 
     def _get_coords(
         self, xml: ET.Element, scene_index: int, dims_shape: Dict[str, Any]
-    ) -> Dict[str, list | np.ndarray]:
+    ) -> Dict[str, Union[list, np.ndarray]]:
         """
         Generate coordinate arrays for channel dimension ("C") and spatial dimensions
         ("X", "Y", and "Z") based on channel names and physical pixel sizes.
