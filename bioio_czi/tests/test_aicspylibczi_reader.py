@@ -200,7 +200,7 @@ def test_czi_reader(
 
 @pytest.mark.xfail(
     raises=exceptions.UnsupportedFileFormatError,
-    reason="Do no support remote CZI reading in aicspylibczi mode",
+    reason="Do not support remote CZI reading in aicspylibczi mode",
 )
 def test_czi_reader_remote_xfail() -> None:
     # Construct full filepath
