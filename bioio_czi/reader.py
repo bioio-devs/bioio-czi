@@ -99,7 +99,6 @@ class Reader(BaseReader):
             Any specific keyword arguments to pass to the fsspec-created filesystem.
             Default: {}
         """
-        # TODO handle case where "wrong" reader is called
         if use_aicspylibczi:
             self._implementation = AicsPyLibCziReader(image, **kwargs)
         else:

@@ -1,3 +1,4 @@
+from typing import Optional
 from xml.etree import ElementTree as ET
 
 from bioio_base.types import PhysicalPixelSizes
@@ -18,7 +19,7 @@ def get_physical_pixel_sizes(metadata: ET.Element) -> PhysicalPixelSizes:
 
 def _single_physical_pixel_size(
     metadata: ET.Element, dimension: str, allow_none: bool = False
-) -> float | None:
+) -> Optional[float]:
     """
     Look up physical pixel size for one dimension.
     """
