@@ -406,3 +406,38 @@ def test_czi_reader_mosaic_coords(
         reader.mosaic_xarray_dask_data.coords[dimensions.DimensionNames.SpatialX].data,
         expected_mosaic_x_coords,
     )
+
+
+def test_standard_metadata() -> None:
+    path = LOCAL_RESOURCES_DIR / "variable_per_scene_dims.czi"
+    image = Reader(path)
+    metadata = image.standard_metadata.to_dict()
+
+    expected = {
+        "Binning": "1x1",
+        "Column": "4",
+        "Dimensions Present": "TCZYX",
+        "Image Size C": 1,
+        "Image Size T": 2,
+        "Image Size X": 1848,
+        "Image Size Y": 1248,
+        "Image Size Z": 2,
+        "Imaged By": "sara.carlson",
+        "Imaging Date": "2020-01-17",
+        "Objective": "10x/0.45",
+        "Pixel Size X": 0.5416666666666666,
+        "Pixel Size Y": 0.5416666666666666,
+        "Pixel Size Z": 2.23,
+        "Position Index": 1,
+        "Row": "4",
+        "Timelapse": True,
+        "Timelapse Interval": 60000.0,
+        "Total Time Duration": 60000,
+    }
+
+    # Compare each key's values.
+    for key, expected_value in expected.items():
+        if isinstance(expected_value, float):
+            assert metadata[key] == pytest.approx(expected_value)
+        else:
+            assert metadata[key] == expected_value
