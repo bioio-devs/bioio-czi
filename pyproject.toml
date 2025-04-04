@@ -29,13 +29,16 @@ classifiers = [
 dynamic = ["version"]
 dependencies = [
   "aicspylibczi>=3.2.1",
-  "bioio-base>=0.2.0",
+  "aiohttp",
+  "bioio-base>=1.0.5",
   "dask[array]>=2021.4.1",
   "fsspec>=2022.8.0",
   "lxml>=4.6,<5",
   "numpy>=1.16",
   "ome-types>=0.3.4",
-  "xarray>=0.16.1",
+  "pylibczirw",
+  "requests",
+  "xarray>=2022.6.0",
 ]
 
 [project.urls]
@@ -98,7 +101,6 @@ ignore = [
   "Justfile",
   ".cookiecutter.yaml",
   "scripts/*",
-
 ]
 
 [tool.mypy]
