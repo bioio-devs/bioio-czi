@@ -84,7 +84,11 @@ class Reader(BaseReader):
     @staticmethod
     def _is_supported_image(fs: AbstractFileSystem, path: str, **kwargs: Any) -> bool:
         if not isinstance(fs, LocalFileSystem):
-            return False
+            raise exceptions.UnsupportedFileFormatError(
+                "bioio-czi[aicspylibczi mode]",
+                path,
+                "Try not setting use_aicspylibczi?",
+            )
         try:
             with fs.open(path) as open_resource:
                 CziFile(open_resource.f)
