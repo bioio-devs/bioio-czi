@@ -8,6 +8,12 @@ from bioio_base.types import PathLike
 from ome_types import OME
 
 
+class UnsupportedMetadataError(Exception):
+    """
+    The reader encountered metadata it doesn't know how to handle.
+    """
+
+
 def generate_ome_image_id(image_id: Union[str, int]) -> str:
     """
     Naively generates the standard OME image ID using a provided ID.
