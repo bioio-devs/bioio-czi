@@ -65,16 +65,16 @@ PIXEL_DICT = {
 
 OME_NS = {"": "http://www.openmicroscopy.org/Schemas/OME/2016-06"}
 
-EXTRACTED_OBJECTIVE_VALUES_TO_VALID_OBJECTIVE_VALUES = {
-    "63x/1.2W": "63x/1.2W",
-    "20x/0.8": "20x/0.80",
-    "40x/1.2W": "40x/1.2W",
-    "100x/1.25W": "100x/1.25W",
-    "100x/1.46Oil": "100x/1.46Oil",
-    "44.83x/1.0W": "44.83x/1.0W",
-    "5x/0.12": "5x/0.12",
-    "10x/0.45": "10x/0.45",
-}
+VALID_OBJECTIVES = [
+    "63x/1.2W",
+    "20x/0.8",
+    "40x/1.2W",
+    "100x/1.25W",
+    "100x/1.46Oil",
+    "44.83x/1.0W",
+    "5x/0.12",
+    "10x/0.45",
+]
 
 ###############################################################################
 
@@ -1094,6 +1094,7 @@ class Reader(BaseReader):
     def objective(self) -> Optional[str]:
         """
         Extracts the microscope objective details.
+
         Returns
         -------
         Optional[str]
@@ -1107,12 +1108,12 @@ class Reader(BaseReader):
                 lens_na = el.get("LensNA")
                 immersion = el.get("Immersion")
 
+                # Determine the immersion suffix.
+                immersion_suffix = ""
                 if immersion == "Oil":
                     immersion_suffix = "Oil"
                 elif immersion == "Water":
                     immersion_suffix = "W"
-                else:
-                    immersion_suffix = ""
 
                 if nominal_magnification is not None and lens_na is not None:
                     raw_objective = (
@@ -1120,19 +1121,14 @@ class Reader(BaseReader):
                         f"{float(lens_na)}{immersion_suffix}"
                     )
 
-                    if (
-                        raw_objective
-                        in EXTRACTED_OBJECTIVE_VALUES_TO_VALID_OBJECTIVE_VALUES.values()
-                    ):
+                    # Check if the raw objective matches one of the valid values.
+                    if raw_objective in VALID_OBJECTIVES:
                         return raw_objective
 
-                    for (
-                        raw_objective_value
-                    ) in EXTRACTED_OBJECTIVE_VALUES_TO_VALID_OBJECTIVE_VALUES.keys():
-                        if raw_objective in raw_objective_value:
-                            return EXTRACTED_OBJECTIVE_VALUES_TO_VALID_OBJECTIVE_VALUES[
-                                raw_objective_value
-                            ]
+                    # Otherwise, check if roughly raw_objective.
+                    for valid in VALID_OBJECTIVES:
+                        if raw_objective in valid:
+                            return valid
         except Exception as exc:
             log.warning("Failed to extract Objective: %s", exc, exc_info=True)
 
