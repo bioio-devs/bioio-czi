@@ -8,9 +8,10 @@ from xml.etree import ElementTree
 import xarray as xr
 from bioio_base.dimensions import Dimensions
 from bioio_base.reader import Reader as BaseReader
+from bioio_base.standard_metadata import StandardMetadata
 from bioio_base.types import PathLike, PhysicalPixelSizes
 from fsspec import AbstractFileSystem
-from ome_types.model.ome import OME
+from ome_types.model import OME
 
 from bioio_czi.aicspylibczi_reader.reader import Reader as AicsPyLibCziReader
 from bioio_czi.pylibczirw_reader.reader import Reader as PylibCziReader
@@ -343,3 +344,12 @@ class Reader(BaseReader):
             The image has no mosaic dimension available.
         """
         return self._implementation.get_mosaic_tile_positions(**kwargs)
+
+    @property
+    def standard_metadata(self) -> StandardMetadata:
+        """
+        Return the standard metadata for this reader, updating specific fields.
+        This implementation calls the base reader’s standard_metadata property
+        via super() and then assigns the new values.
+        """
+        return self._implementation.standard_metadata
