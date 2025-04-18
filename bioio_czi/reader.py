@@ -10,7 +10,7 @@ from bioio_base.dimensions import Dimensions
 from bioio_base.reader import Reader as BaseReader
 from bioio_base.types import PathLike, PhysicalPixelSizes
 from fsspec import AbstractFileSystem
-from ome_types.model.ome import OME
+from ome_types.model.ome import OME  # PUSH TESTS
 
 from bioio_czi.aicspylibczi_reader.reader import Reader as AicsPyLibCziReader
 from bioio_czi.pylibczirw_reader.reader import Reader as PylibCziReader
