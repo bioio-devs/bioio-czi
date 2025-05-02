@@ -53,7 +53,7 @@ def time_between_subblocks(
 
     if start_time is not None and end_time is not None:
         delta = end_time - start_time
-        ms: int = round(delta.total_seconds()) * 1000
-        return ms
+        milliseconds: int = round(delta.total_seconds()) * 1000
+        return milliseconds
 
     return None
