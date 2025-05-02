@@ -42,32 +42,6 @@ def binning(ome_metadata: OME) -> Optional[str]:
     return None
 
 
-def column(metadata: Element, current_scene_index: int) -> Optional[str]:
-    """
-    Extracts the well column index for the current scene.
-    Returns
-    -------
-    Optional[str]
-        The column index as a string. Returns None if not found.
-    """
-    try:
-        scenes = metadata.findall(
-            "Metadata/Information/Image/Dimensions/S/Scenes/Scene"
-        )
-        for scene in scenes:
-            index = scene.get("Index")
-            if index is not None and int(index) == current_scene_index:
-                shape = scene.find("Shape")
-                if shape is not None:
-                    col = shape.find("ColumnIndex")
-                    if col is not None:
-                        return col.text
-    except Exception as exc:
-        log.warning("Failed to extract well column index: %s", exc, exc_info=True)
-
-    return None
-
-
 def imaged_by(ome_metadata: OME) -> Optional[str]:
     """
     Extracts the name of the experimenter (user who imaged the sample).
@@ -180,6 +154,49 @@ def position_index(scene: str) -> Optional[int]:
     return None
 
 
+def _row_or_column(
+    metadata: Element, current_scene_index: int, row_or_column: str
+) -> Optional[str]:
+    """
+    Extracts the well row or index for the current scene.
+    Returns
+    -------
+    Optional[str]
+        The column index as a string. Returns None if not found.
+    """
+    try:
+        scenes = metadata.findall(
+            "Metadata/Information/Image/Dimensions/S/Scenes/Scene"
+        )
+        for scene in scenes:
+            scene_index = scene.get("Index")
+            if scene_index is not None and int(scene_index) == current_scene_index:
+                shape = scene.find("Shape")
+                if shape is not None:
+                    index = shape.find(
+                        "RowIndex" if row_or_column == "row" else "ColumnIndex"
+                    )
+                    if index is not None:
+                        return index.text
+    except Exception as exc:
+        log.warning(
+            f"Failed to extract well {row_or_column} index: %s", exc, exc_info=True
+        )
+
+    return None
+
+
+def column(metadata: Element, current_scene_index: int) -> Optional[str]:
+    """
+    Extracts the well column index for the current scene.
+    Returns
+    -------
+    Optional[str]
+        The column index as a string. Returns None if not found.
+    """
+    return _row_or_column(metadata, current_scene_index, "column")
+
+
 def row(metadata: Element, current_scene_index: int) -> Optional[str]:
     """
     Extracts the well row index for the current scene.
@@ -188,19 +205,4 @@ def row(metadata: Element, current_scene_index: int) -> Optional[str]:
     Optional[str]
         The row index as a string. Returns None if not found.
     """
-    try:
-        scenes = metadata.findall(
-            "Metadata/Information/Image/Dimensions/S/Scenes/Scene"
-        )
-        for scene in scenes:
-            index = scene.get("Index")
-            if index is not None and int(index) == current_scene_index:
-                shape = scene.find("Shape")
-                if shape is not None:
-                    row = shape.find("RowIndex")
-                    if row is not None:
-                        return row.text
-    except Exception as exc:
-        log.warning("Failed to extract well row index: %s", exc, exc_info=True)
-
-    return None
+    return _row_or_column(metadata, current_scene_index, "row")
