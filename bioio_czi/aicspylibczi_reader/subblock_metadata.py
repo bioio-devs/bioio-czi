@@ -1,3 +1,6 @@
+"""
+Helper functions extracting metadata from subblocks in aicspylibczi mode.
+"""
 import datetime
 import logging
 from typing import Optional
@@ -8,7 +11,7 @@ from lxml import etree
 log = logging.getLogger(__name__)
 
 
-def extract_acquisition_time_from_subblock_metadata(
+def _extract_acquisition_time_from_subblock_metadata(
     subblock_metadata: list[tuple[dict, str]]
 ) -> Optional[datetime.datetime]:
     """Extracts acquisition time from subblock metadata."""
@@ -38,18 +41,19 @@ def extract_acquisition_time_from_subblock_metadata(
     return None
 
 
-def acquisition_time(czi: CziFile, which_subblock: int) -> Optional[datetime.datetime]:
+def _acquisition_time(czi: CziFile, which_subblock: int) -> Optional[datetime.datetime]:
     subblock_metadata = czi.read_subblock_metadata(
         Z=0, C=0, T=which_subblock, R=0, S=0, I=0, H=0, V=0
     )
-    return extract_acquisition_time_from_subblock_metadata(subblock_metadata)
+    return _extract_acquisition_time_from_subblock_metadata(subblock_metadata)
 
 
 def time_between_subblocks(
     czi: CziFile, start_subblock_index: int, end_subblock_index: int
 ) -> Optional[int]:
-    start_time = acquisition_time(czi, start_subblock_index)
-    end_time = acquisition_time(czi, end_subblock_index)
+    """Calculates the time between two subblocks in milliseconds."""
+    start_time = _acquisition_time(czi, start_subblock_index)
+    end_time = _acquisition_time(czi, end_subblock_index)
 
     if start_time is not None and end_time is not None:
         delta = end_time - start_time
