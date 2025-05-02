@@ -27,7 +27,7 @@ from .. import metadata as metadata_utils
 from ..bounding_box import size
 from ..channels import get_channel_names
 from ..pixel_sizes import get_physical_pixel_sizes
-from .subblock_metadata import extract_acquisition_time_from_subblock_metadata
+from .subblock_metadata import time_between_subblocks
 
 ###############################################################################
 
@@ -966,36 +966,9 @@ class Reader(BaseReader):
         try:
             with self._fs.open(self._path) as open_resource:
                 czi = CziFile(open_resource.f)
-
-                # Get acquisition time of first subblock (T=0)
-                metadata_of_first_subblock = czi.read_subblock_metadata(
-                    Z=0, C=0, T=0, R=0, S=0, I=0, H=0, V=0
+                return time_between_subblocks(
+                    czi, start_subblock_index=0, end_subblock_index=1
                 )
-                acquisition_time_of_first_subblock = (
-                    extract_acquisition_time_from_subblock_metadata(
-                        metadata_of_first_subblock
-                    )
-                )
-
-                # Get acquisition time of second subblock (T=1)
-                metadata_of_second_subblock = czi.read_subblock_metadata(
-                    Z=0, C=0, T=1, R=0, S=0, I=0, H=0, V=0
-                )
-                acquisition_time_of_second_subblock = (
-                    extract_acquisition_time_from_subblock_metadata(
-                        metadata_of_second_subblock
-                    )
-                )
-
-                if (
-                    acquisition_time_of_first_subblock
-                    and acquisition_time_of_second_subblock
-                ):
-                    delta = (
-                        acquisition_time_of_second_subblock
-                        - acquisition_time_of_first_subblock
-                    )
-                    return round(delta.total_seconds(), 0) * 1000
 
         except Exception as exc:
             log.warning("Failed to extract Timelapse Interval: %s", exc, exc_info=True)
@@ -1024,36 +997,10 @@ class Reader(BaseReader):
 
                 last_timepoint = int(size_t_element.text) - 1
 
-                # Get acquisition time of first subblock (T=0)
-                metadata_of_first_subblock = czi.read_subblock_metadata(
-                    Z=0, C=0, T=0, R=0, S=0, I=0, H=0, V=0
+                duration = time_between_subblocks(
+                    czi, start_subblock_index=0, end_subblock_index=last_timepoint
                 )
-                acquisition_time_of_first_subblock = (
-                    extract_acquisition_time_from_subblock_metadata(
-                        metadata_of_first_subblock
-                    )
-                )
-
-                # Get acquisition time of last subblock (T=last_timepoint)
-                metadata_of_last_subblock = czi.read_subblock_metadata(
-                    Z=0, C=0, T=last_timepoint, R=0, S=0, I=0, H=0, V=0
-                )
-                acquisition_time_of_last_subblock = (
-                    extract_acquisition_time_from_subblock_metadata(
-                        metadata_of_last_subblock
-                    )
-                )
-
-                if (
-                    acquisition_time_of_first_subblock
-                    and acquisition_time_of_last_subblock
-                ):
-                    delta = (
-                        acquisition_time_of_last_subblock
-                        - acquisition_time_of_first_subblock
-                    )
-                    # Convert to milliseconds
-                    return str(int(round(delta.total_seconds(), 0) * 1000))
+                return str(duration) if duration is not None else None
 
         except Exception as exc:
             log.warning("Failed to extract Total Time Duration: %s", exc, exc_info=True)
