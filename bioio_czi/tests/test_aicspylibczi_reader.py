@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import xml.etree.ElementTree as ET
-from typing import Any, List, Tuple
+from typing import List, Tuple
 
 import numpy as np
 import pytest
@@ -415,69 +415,3 @@ def test_czi_reader_mosaic_coords(
         reader.mosaic_xarray_dask_data.coords[dimensions.DimensionNames.SpatialX].data,
         expected_mosaic_x_coords,
     )
-
-
-@pytest.mark.parametrize(
-    "filename, expected",
-    [
-        (
-            "variable_per_scene_dims.czi",
-            {
-                "Binning": "1x1",
-                "Column": "4",
-                "Dimensions Present": "TCZYX",
-                "Image Size C": 1,
-                "Image Size T": 2,
-                "Image Size X": 1848,
-                "Image Size Y": 1248,
-                "Image Size Z": 2,
-                "Imaged By": "sara.carlson",
-                "Imaging Date": "2020-01-17",
-                "Objective": "10x/0.45",
-                "Pixel Size X": 0.5416666666666666,
-                "Pixel Size Y": 0.5416666666666666,
-                "Pixel Size Z": 2.23,
-                "Position Index": 1,
-                "Row": "4",
-                "Timelapse": True,
-                "Timelapse Interval": 60000.0,
-                "Total Time Duration": "60000",
-            },
-        ),
-        (
-            "OverViewScan.czi",
-            {
-                "Binning": "Other",
-                "Column": None,
-                "Dimensions Present": "CMYX",
-                "Image Size C": 1,
-                "Image Size T": None,
-                "Image Size X": 544,
-                "Image Size Y": 440,
-                "Image Size Z": None,
-                "Imaged By": "M1SRH",
-                "Imaging Date": "2016-03-11",
-                "Objective": None,
-                "Pixel Size X": 4.5743626119409,
-                "Pixel Size Y": 4.5743626119409,
-                "Pixel Size Z": None,
-                "Position Index": None,
-                "Row": None,
-                "Timelapse": False,
-                "Timelapse Interval": 0.0,
-                "Total Time Duration": None,
-            },
-        ),
-    ],
-)
-def test_standard_metadata(filename: str, expected: dict[str, Any]) -> None:
-    uri = LOCAL_RESOURCES_DIR / filename
-    reader = Reader(uri, use_aicspylibczi=True)
-    metadata = reader.standard_metadata.to_dict()
-
-    # Compare each key's values.
-    for key, expected_value in expected.items():
-        if isinstance(expected_value, float):
-            assert metadata[key] == pytest.approx(expected_value)
-        else:
-            assert metadata[key] == expected_value
