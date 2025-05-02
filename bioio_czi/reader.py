@@ -9,10 +9,11 @@ import xarray as xr
 from bioio_base.dimensions import Dimensions
 from bioio_base.reader import Reader as BaseReader
 from bioio_base.standard_metadata import StandardMetadata
-from bioio_base.types import PathLike, PhysicalPixelSizes
+from bioio_base.types import PathLike, PhysicalPixelSizes, TimeInterval
 from fsspec import AbstractFileSystem
 from ome_types.model import OME
 
+from bioio_czi import standard_metadata
 from bioio_czi.aicspylibczi_reader.reader import Reader as AicsPyLibCziReader
 from bioio_czi.pylibczirw_reader.reader import Reader as PylibCziReader
 
@@ -346,10 +347,33 @@ class Reader(BaseReader):
         return self._implementation.get_mosaic_tile_positions(**kwargs)
 
     @property
+    def time_interval(self) -> TimeInterval:
+        """
+        Extracts the time interval between the first two time points in milliseconds.
+        Returns
+        -------
+        Optional[float]
+            Timelapse interval in milliseconds. Returns None if extraction fails.
+        """
+        return self._implementation.time_interval
+
+    @property
     def standard_metadata(self) -> StandardMetadata:
         """
         Return the standard metadata for this reader, updating specific fields.
-        This implementation calls the base reader’s standard_metadata property
+        This implementation calls the base reader's standard_metadata property
         via super() and then assigns the new values.
         """
-        return self._implementation.standard_metadata
+        metadata = super().standard_metadata
+        metadata.binning = standard_metadata.binning(self.ome_metadata)
+        metadata.column = standard_metadata.column(
+            self.metadata, self.current_scene_index
+        )
+        metadata.imaged_by = standard_metadata.imaged_by(self.ome_metadata)
+        metadata.imaging_date = standard_metadata.imaging_date(self.ome_metadata)
+        metadata.objective = standard_metadata.objective(self.ome_metadata)
+        metadata.position_index = standard_metadata.position_index(self.current_scene)
+        metadata.row = standard_metadata.row(self.metadata, self.current_scene_index)
+        metadata.total_time_duration = self._implementation.total_time_duration
+
+        return metadata

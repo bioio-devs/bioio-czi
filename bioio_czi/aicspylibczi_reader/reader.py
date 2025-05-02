@@ -1,13 +1,8 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
-import datetime
 import logging
 import xml.etree.ElementTree as ET
 from copy import copy
 from pathlib import Path
 from typing import Any, Dict, Hashable, List, Optional, Tuple, Union
-from zoneinfo import ZoneInfo
 
 import dask.array as da
 import numpy as np
@@ -24,18 +19,15 @@ from bioio_base.dimensions import (
     Dimensions,
 )
 from bioio_base.reader import Reader as BaseReader
-from bioio_base.standard_metadata import StandardMetadata
 from dask import delayed
 from fsspec.implementations.local import LocalFileSystem
 from fsspec.spec import AbstractFileSystem
-from lxml import etree
-from lxml.etree import XML, _Element
-from ome_types.model import OME
 
 from .. import metadata as metadata_utils
 from ..bounding_box import size
 from ..channels import get_channel_names
 from ..pixel_sizes import get_physical_pixel_sizes
+from .subblock_metadata import extract_acquisition_time_from_subblock_metadata
 
 ###############################################################################
 
@@ -59,24 +51,6 @@ PIXEL_DICT = {
     "bgr48": np.uint16,
     "invalid": np.uint8,
 }
-
-
-###############################################################################
-
-OME_NS = {"": "http://www.openmicroscopy.org/Schemas/OME/2016-06"}
-
-VALID_OBJECTIVES = [
-    "63x/1.2W",
-    "20x/0.8",
-    "40x/1.2W",
-    "100x/1.25W",
-    "100x/1.46Oil",
-    "44.83x/1.0W",
-    "5x/0.12",
-    "10x/0.45",
-]
-
-###############################################################################
 
 
 class Reader(BaseReader):
@@ -981,160 +955,6 @@ class Reader(BaseReader):
             ]
 
     @property
-    def ome_metadata(self) -> OME:
-        return metadata_utils.transform_metadata_with_xslt(
-            self.metadata,
-            Path(__file__).parent.parent / "czi-to-ome-xslt/xslt/czi-to-ome.xsl",
-        )
-
-    def _get_metadata_element(self, path: str) -> Optional[_Element]:
-        """Gets the first occurrence of the given XML path if one exists."""
-        xml = XML(self.ome_metadata.to_xml())
-        return xml.find(path, OME_NS)
-
-    def _extract_acquisition_time_from_subblock_metadata(
-        self, subblock_metadata: list
-    ) -> Optional[datetime.datetime]:
-        """Extracts acquisition time from subblock metadata."""
-        if not subblock_metadata:
-            return None
-
-        metablock_of_subblock = subblock_metadata[0][1]
-        outlxml = etree.fromstring(metablock_of_subblock)
-        acquisition_time_element = outlxml.find(".//AcquisitionTime")
-
-        if acquisition_time_element is not None and acquisition_time_element.text:
-            try:
-                acquisition_time_from_czi_xml = acquisition_time_element.text
-                acquisition_time_as_date = datetime.datetime.strptime(
-                    acquisition_time_from_czi_xml.split(".")[0], "%Y-%m-%dT%H:%M:%S"
-                )
-
-                formatted_acquisition_time = (
-                    acquisition_time_as_date
-                    + datetime.timedelta(
-                        microseconds=int(
-                            str(acquisition_time_from_czi_xml).split(".")[1][:-1]
-                        )
-                        / 1000
-                    )
-                )
-
-                return formatted_acquisition_time
-            except Exception as exc:
-                log.warning(
-                    "Failed to extract acquisition time: %s", exc, exc_info=True
-                )
-
-        return None
-
-    @property
-    def imaging_date(self) -> Optional[str]:
-        """
-        Extracts the acquisition date from the OME metadata.
-        Returns
-        -------
-        Optional[str]
-            The acquisition date in ISO format (YYYY-MM-DD) adjusted to Pacific Time.
-            Returns None if the acquisition date is not found or cannot be parsed.
-        """
-        try:
-            el = self._get_metadata_element("./Image/AcquisitionDate")
-            if el is not None and el.text:
-                # Convert from ISO 8601 (e.g., "2025-03-31T12:00:00Z") to datetime
-                utc_time = datetime.datetime.fromisoformat(
-                    el.text.replace("Z", "+00:00")
-                )
-                pacific_time = utc_time.astimezone(ZoneInfo("America/Los_Angeles"))
-                return pacific_time.date().isoformat()
-        except ValueError as exc:
-            log.warning("Failed to parse Acquisition Date: %s", exc, exc_info=True)
-        except Exception as exc:
-            log.warning("Failed to extract Acquisition Date: %s", exc, exc_info=True)
-
-        return None
-
-    @property
-    def binning(self) -> Optional[str]:
-        """
-        Extracts the binning setting from the OME metadata.
-        Returns
-        -------
-        Optional[str]
-            The binning setting as a string. Returns None if not found.
-        """
-        try:
-            el = self._get_metadata_element("./Image/Pixels/Channel/DetectorSettings")
-            if el is not None:
-                return el.get("Binning", None)
-        except Exception as exc:
-            log.warning("Failed to extract Binning setting: %s", exc, exc_info=True)
-
-        return None
-
-    @property
-    def imaged_by(self) -> Optional[str]:
-        """
-        Extracts the name of the experimenter (user who imaged the sample).
-        Returns
-        -------
-        Optional[str]
-            The username of the experimenter. Returns None if not found.
-        """
-        try:
-            el = self._get_metadata_element("./Experimenter")
-            if el is not None:
-                return el.get("UserName", None)
-        except Exception as exc:
-            log.warning("Failed to extract Imaged By: %s", exc, exc_info=True)
-
-        return None
-
-    @property
-    def objective(self) -> Optional[str]:
-        """
-        Extracts the microscope objective details.
-
-        Returns
-        -------
-        Optional[str]
-            The formatted objective magnification and numerical aperture.
-            Returns None if not found.
-        """
-        try:
-            el = self._get_metadata_element("./Instrument/Objective")
-            if el is not None:
-                nominal_magnification = el.get("NominalMagnification")
-                lens_na = el.get("LensNA")
-                immersion = el.get("Immersion")
-
-                # Determine the immersion suffix.
-                immersion_suffix = ""
-                if immersion == "Oil":
-                    immersion_suffix = "Oil"
-                elif immersion == "Water":
-                    immersion_suffix = "W"
-
-                if nominal_magnification is not None and lens_na is not None:
-                    raw_objective = (
-                        f"{round(float(nominal_magnification))}x/"
-                        f"{float(lens_na)}{immersion_suffix}"
-                    )
-
-                    # Check if the raw objective matches one of the valid values.
-                    if raw_objective in VALID_OBJECTIVES:
-                        return raw_objective
-
-                    # Otherwise, check if roughly raw_objective.
-                    for valid in VALID_OBJECTIVES:
-                        if raw_objective in valid:
-                            return valid
-        except Exception as exc:
-            log.warning("Failed to extract Objective: %s", exc, exc_info=True)
-
-        return None
-
-    @property
     def time_interval(self) -> types.TimeInterval:
         """
         Extracts the time interval between the first two time points in milliseconds.
@@ -1152,7 +972,7 @@ class Reader(BaseReader):
                     Z=0, C=0, T=0, R=0, S=0, I=0, H=0, V=0
                 )
                 acquisition_time_of_first_subblock = (
-                    self._extract_acquisition_time_from_subblock_metadata(
+                    extract_acquisition_time_from_subblock_metadata(
                         metadata_of_first_subblock
                     )
                 )
@@ -1162,7 +982,7 @@ class Reader(BaseReader):
                     Z=0, C=0, T=1, R=0, S=0, I=0, H=0, V=0
                 )
                 acquisition_time_of_second_subblock = (
-                    self._extract_acquisition_time_from_subblock_metadata(
+                    extract_acquisition_time_from_subblock_metadata(
                         metadata_of_second_subblock
                     )
                 )
@@ -1183,13 +1003,15 @@ class Reader(BaseReader):
         return None
 
     @property
-    def total_time_duration(self) -> Optional[int]:
+    def total_time_duration(self) -> Optional[str]:
         """
         Extracts the total duration of the timelapse in milliseconds.
         Returns
         -------
-        Optional[int]
-            Total time duration in milliseconds. Returns None if extraction fails.
+        Optional[str]
+            Total time duration in milliseconds, as a string. The return value is a
+            string to satisfy the StandardMetadata contract.
+            Returns None if extraction fails.
         """
         try:
             with self._fs.open(self._path) as open_resource:
@@ -1207,7 +1029,7 @@ class Reader(BaseReader):
                     Z=0, C=0, T=0, R=0, S=0, I=0, H=0, V=0
                 )
                 acquisition_time_of_first_subblock = (
-                    self._extract_acquisition_time_from_subblock_metadata(
+                    extract_acquisition_time_from_subblock_metadata(
                         metadata_of_first_subblock
                     )
                 )
@@ -1217,7 +1039,7 @@ class Reader(BaseReader):
                     Z=0, C=0, T=last_timepoint, R=0, S=0, I=0, H=0, V=0
                 )
                 acquisition_time_of_last_subblock = (
-                    self._extract_acquisition_time_from_subblock_metadata(
+                    extract_acquisition_time_from_subblock_metadata(
                         metadata_of_last_subblock
                     )
                 )
@@ -1230,108 +1052,10 @@ class Reader(BaseReader):
                         acquisition_time_of_last_subblock
                         - acquisition_time_of_first_subblock
                     )
-                    return int(
-                        round(delta.total_seconds(), 0) * 1000
-                    )  # Convert to milliseconds
+                    # Convert to milliseconds
+                    return str(int(round(delta.total_seconds(), 0) * 1000))
 
         except Exception as exc:
             log.warning("Failed to extract Total Time Duration: %s", exc, exc_info=True)
 
         return None
-
-    @property
-    def row(self) -> Optional[str]:
-        """
-        Extracts the well row index for the current scene.
-        Returns
-        -------
-        Optional[str]
-            The row index as a string. Returns None if not found.
-        """
-        try:
-            scenes = self.metadata.findall(
-                "Metadata/Information/Image/Dimensions/S/Scenes/Scene"
-            )
-            for scene in scenes:
-                if int(scene.get("Index")) == self.current_scene_index:
-                    shape = scene.find("Shape")
-                    if shape is not None:
-                        row = shape.find("RowIndex")
-                        if row is not None:
-                            return row.text
-        except Exception as exc:
-            log.warning("Failed to extract well row index: %s", exc, exc_info=True)
-
-        return None
-
-    @property
-    def column(self) -> Optional[str]:
-        """
-        Extracts the well column index for the current scene.
-        Returns
-        -------
-        Optional[str]
-            The column index as a string. Returns None if not found.
-        """
-        try:
-            scenes = self.metadata.findall(
-                "Metadata/Information/Image/Dimensions/S/Scenes/Scene"
-            )
-            for scene in scenes:
-                if int(scene.get("Index")) == self.current_scene_index:
-                    shape = scene.find("Shape")
-                    if shape is not None:
-                        col = shape.find("ColumnIndex")
-                        if col is not None:
-                            return col.text
-        except Exception as exc:
-            log.warning("Failed to extract well column index: %s", exc, exc_info=True)
-
-        return None
-
-    @property
-    def position_index(self) -> Optional[int]:
-        """
-        Extracts the numeric position index from the current scene name.
-        Returns
-        -------
-        Optional[int]
-            The numeric part of the scene name.
-            Returns None if parsing fails.
-        """
-        try:
-            scene_name = self.scenes[self.current_scene_index]
-            # Use only the first part before a "-" if present
-            prefix = scene_name.split("-")[0]
-            return int(prefix[1:])
-        except (IndexError, ValueError) as exc:
-            log.warning(
-                "Failed to parse position index from scene name '%s': %s",
-                scene_name,
-                exc,
-                exc_info=True,
-            )
-        except Exception as exc:
-            log.warning(
-                "Unexpected error parsing position index: %s", exc, exc_info=True
-            )
-
-        return None
-
-    @property
-    def standard_metadata(self) -> StandardMetadata:
-        """
-        Return the standard metadata for this reader, updating specific fields.
-        This implementation calls the base reader’s standard_metadata property
-        via super() and then assigns the new values.
-        """
-        metadata = super().standard_metadata
-        metadata.binning = self.binning
-        metadata.column = self.column
-        metadata.imaged_by = self.imaged_by
-        metadata.imaging_date = self.imaging_date
-        metadata.objective = self.objective
-        metadata.position_index = self.position_index
-        metadata.row = self.row
-        metadata.total_time_duration = self.total_time_duration
-        return metadata

@@ -441,7 +441,7 @@ def test_standard_metadata() -> None:
         "Row": "4",
         "Timelapse": True,
         "Timelapse Interval": 60000.0,
-        "Total Time Duration": 60000,
+        "Total Time Duration": "60000",
     }
 
     # Compare each key's values.
