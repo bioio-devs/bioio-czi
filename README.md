@@ -40,8 +40,8 @@ The primary difference is that `pylibczirw` supports reading CZIs over the inter
 
 *Elapsed time metadata include the following. These are derived from individual subblock metadata.
 * `BioImage(...).time_interval`
-* `BioImage(...).standard_metadata.get["Timelapse Interval"]`
-* `BioImage(...).standard_metadata.get["Total Time Duration"]`
+* `BioImage(...).standard_metadata.timelapse_interval`
+* `BioImage(...).standard_metadata.total_time_duration`
 
 ## Example Usage (see full documentation for more examples)
 
