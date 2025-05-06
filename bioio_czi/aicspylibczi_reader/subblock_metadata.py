@@ -47,7 +47,10 @@ def time_between_subblocks(
 
     if start_time is not None and end_time is not None:
         delta = end_time - start_time
-        milliseconds: int = round(delta.total_seconds()) * 1000
-        return milliseconds
+        # Difference in milliseconds is delta divided by 1 millisecond
+        # This method is recommended by the documentation.
+        # https://docs.python.org/3/library/datetime.html#datetime.timedelta.total_seconds
+        milliseconds = delta / datetime.timedelta(milliseconds=1)
+        return round(milliseconds)
 
     return None
