@@ -97,8 +97,10 @@ from .conftest import LOCAL_RESOURCES_DIR
                 "Dimensions Present": "CYX",  # aicspylibczi mode has CMYX
                 "Image Size C": 1,
                 "Image Size T": None,
-                "Image Size X": 7398,  # Larger than aicspylibczi mode
-                "Image Size Y": 3212,  # Larger than aicspylibczi mode
+                # This image is larger in X and Y when using pylibczirw mode than
+                # aicspylibczi mode because all the tiles are stitched together.
+                "Image Size X": 7398,
+                "Image Size Y": 3212,
                 "Image Size Z": None,
                 "Imaged By": "M1SRH",
                 "Imaging Date": "2016-03-11",
