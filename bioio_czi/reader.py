@@ -364,7 +364,14 @@ class Reader(BaseReader):
         This implementation calls the base reader's standard_metadata property
         via super() and then assigns the new values.
         """
+        # 1. Some of the standard metadata can be read from all bioio Readers in the
+        # same way, which the following super() call does. For instance,
+        # standard_metadata.timelapse_interval is set to self.time_interval.
         metadata = super().standard_metadata
+
+        # 2. Most of the remaining implementation is identical across pylibczirw and
+        # aicspylibczi modes, so it is shared here. The self-contained standard_metadata
+        # module holds the implementation for extracting these from the metadata.
         metadata.binning = standard_metadata.binning(self.ome_metadata)
         metadata.column = standard_metadata.column(
             self.metadata, self.current_scene_index
@@ -374,6 +381,9 @@ class Reader(BaseReader):
         metadata.objective = standard_metadata.objective(self.ome_metadata)
         metadata.position_index = standard_metadata.position_index(self.current_scene)
         metadata.row = standard_metadata.row(self.metadata, self.current_scene_index)
+
+        # 3. Finally, total_time_duration is mode-specific, as only aicspylibczi mode
+        # has access to the necessary subblock metadata.
         metadata.total_time_duration = self._implementation.total_time_duration
 
         return metadata
