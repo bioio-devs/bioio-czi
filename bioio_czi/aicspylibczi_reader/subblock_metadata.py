@@ -6,6 +6,7 @@ import logging
 from typing import Optional
 
 from aicspylibczi import CziFile
+from dateutil import parser
 from lxml import etree
 
 log = logging.getLogger(__name__)
@@ -24,7 +25,10 @@ def _extract_acquisition_time_from_subblock_metadata(
 
     if acquisition_time_element is not None and acquisition_time_element.text:
         try:
-            return datetime.datetime.fromisoformat(str(acquisition_time_element.text))
+            # For Python 3.11+, the builtin datetime is sufficient. If we drop support
+            # for 3.10, use datetime.datetime.fromisoformat instead of
+            # dateutil.parser.isoparse.
+            return parser.isoparse(str(acquisition_time_element.text))
         except Exception as exc:
             log.warning("Failed to extract acquisition time: %s", exc, exc_info=True)
 
