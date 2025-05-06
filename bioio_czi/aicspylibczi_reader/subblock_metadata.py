@@ -40,7 +40,7 @@ def _acquisition_time(czi: CziFile, which_subblock: int) -> Optional[datetime.da
 
 def time_between_subblocks(
     czi: CziFile, start_subblock_index: int, end_subblock_index: int
-) -> Optional[int]:
+) -> Optional[float]:
     """Calculates the time between two subblocks in milliseconds."""
     start_time = _acquisition_time(czi, start_subblock_index)
     end_time = _acquisition_time(czi, end_subblock_index)
@@ -50,7 +50,6 @@ def time_between_subblocks(
         # Difference in milliseconds is delta divided by 1 millisecond
         # This method is recommended by the documentation.
         # https://docs.python.org/3/library/datetime.html#datetime.timedelta.total_seconds
-        milliseconds = delta / datetime.timedelta(milliseconds=1)
-        return round(milliseconds)
+        return delta / datetime.timedelta(milliseconds=1)
 
     return None

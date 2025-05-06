@@ -34,8 +34,8 @@ from .conftest import LOCAL_RESOURCES_DIR
                 "Position Index": 1,
                 "Row": "4",
                 "Timelapse": True,
-                "Timelapse Interval": 60000.0,
-                "Total Time Duration": "60000",
+                "Timelapse Interval": 59927.0,
+                "Total Time Duration": "59927.0",
             },
         ),
         (
