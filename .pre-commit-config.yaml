@@ -29,4 +29,6 @@ repos:
     rev: v1.4.1
     hooks:
       - id: mypy
-        additional_dependencies: [types-PyYAML>=6.0.12.9]
+        additional_dependencies:
+          - types-PyYAML>=6.0.12.9
+          - types-python-dateutil
