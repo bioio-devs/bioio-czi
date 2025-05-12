@@ -430,6 +430,13 @@ class Reader(BaseReader):
         """
         return None
 
+    @property
+    def total_time_duration(self) -> None:
+        """
+        Cannot read time duration accurately without subblock metadata.
+        """
+        return None
+
 
 def open(filepath: str) -> ContextManager[czi.CziReader]:
     """

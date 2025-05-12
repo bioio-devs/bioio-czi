@@ -1,6 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
 import logging
 import xml.etree.ElementTree as ET
 from copy import copy
@@ -30,6 +27,7 @@ from .. import metadata as metadata_utils
 from ..bounding_box import size
 from ..channels import get_channel_names
 from ..pixel_sizes import get_physical_pixel_sizes
+from .subblock_metadata import time_between_subblocks
 
 ###############################################################################
 
@@ -53,9 +51,6 @@ PIXEL_DICT = {
     "bgr48": np.uint16,
     "invalid": np.uint8,
 }
-
-
-###############################################################################
 
 
 class Reader(BaseReader):
@@ -958,3 +953,56 @@ class Reader(BaseReader):
                 m_indexes_to_mosaic_positions[m_index]
                 for m_index in sorted(m_indexes_to_mosaic_positions.keys())
             ]
+
+    @property
+    def time_interval(self) -> types.TimeInterval:
+        """
+        Extracts the time interval between the first two time points in milliseconds.
+        Returns
+        -------
+        Optional[int]
+            Timelapse interval in milliseconds. Returns None if extraction fails.
+        """
+        try:
+            with self._fs.open(self._path) as open_resource:
+                czi = CziFile(open_resource.f)
+                return time_between_subblocks(
+                    czi, start_subblock_index=0, end_subblock_index=1
+                )
+
+        except Exception as exc:
+            log.warning("Failed to extract Timelapse Interval: %s", exc, exc_info=True)
+
+        return None
+
+    @property
+    def total_time_duration(self) -> Optional[str]:
+        """
+        Extracts the total duration of the timelapse in milliseconds.
+        Returns
+        -------
+        Optional[str]
+            Total time duration in milliseconds, as a string. The return value is a
+            string to satisfy the StandardMetadata contract.
+            Returns None if extraction fails.
+        """
+        try:
+            with self._fs.open(self._path) as open_resource:
+                czi = CziFile(open_resource.f)
+
+                # Get the number of time points (SizeT)
+                size_t_element = czi.meta.find(".//SizeT")
+                if size_t_element is None or not size_t_element.text:
+                    return None
+
+                last_timepoint = int(size_t_element.text) - 1
+
+                duration = time_between_subblocks(
+                    czi, start_subblock_index=0, end_subblock_index=last_timepoint
+                )
+                return str(duration) if duration is not None else None
+
+        except Exception as exc:
+            log.warning("Failed to extract Total Time Duration: %s", exc, exc_info=True)
+
+        return None
