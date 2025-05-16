@@ -147,7 +147,7 @@ def test_standard_metadata(
             {
                 "Image Size T": 2,
                 "Timelapse Interval": 59927.0,
-                "Total Time Duration": "60273.0",
+                "Total Time Duration": "59927.0",
             },
         ),
         (
@@ -157,7 +157,7 @@ def test_standard_metadata(
             {
                 "Image Size T": 1,
                 "Timelapse Interval": None,
-                "Total Time Duration": "343.0",
+                "Total Time Duration": None,
             },
         ),
         (
