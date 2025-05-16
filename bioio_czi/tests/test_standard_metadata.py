@@ -10,6 +10,8 @@ from .conftest import LOCAL_RESOURCES_DIR
 # Test each each of the following files in both aicspylibczi and pylibczirw modes.
 #   variable_per_scene_dims.czi
 #   OverViewScan.czi
+# S=2_4x2_T=2=Z=3_CH=2.czi is only tested in aicspylibczi mode since it is used mainly
+# for testing duration and interval, which aren't available in pylibczirw mode.
 @pytest.mark.parametrize(
     "use_aicspylibczi, filename, expected",
     [
@@ -155,6 +157,73 @@ def test_standard_metadata(
     metadata = reader.standard_metadata.to_dict()
 
     # Compare each key's values.
+    for key, expected_value in expected.items():
+        error_message = f"{key}: Expected: {expected_value}, Actual: {metadata[key]}"
+        if isinstance(expected_value, float):
+            assert metadata[key] == pytest.approx(expected_value), error_message
+        else:
+            assert metadata[key] == expected_value, error_message
+
+
+# These test cases are specifically to check that standard_metadata reports metadata
+# of the user-selected scene.
+@pytest.mark.parametrize(
+    "use_aicspylibczi, filename, scene, expected",
+    [
+        (
+            True,
+            "variable_per_scene_dims.czi",
+            0,
+            {
+                "Image Size T": 2,
+                "Timelapse Interval": 59927.0,
+                "Total Time Duration": "60273.0",
+            },
+        ),
+        (
+            True,
+            "variable_per_scene_dims.czi",
+            1,
+            {
+                "Image Size T": 1,
+                "Timelapse Interval": None,
+                "Total Time Duration": "343.0",
+            },
+        ),
+        (
+            False,
+            "variable_per_scene_dims.czi",
+            0,
+            {
+                "Image Size T": 2,
+            },
+        ),
+        (
+            False,
+            "variable_per_scene_dims.czi",
+            1,
+            {
+                "Image Size T": 1,
+            },
+        ),
+    ],
+)
+def test_standard_metadata_with_set_scene(
+    use_aicspylibczi: bool, filename: str, scene: int, expected: dict[str, Any]
+) -> None:
+    # Arrange
+    uri = LOCAL_RESOURCES_DIR / filename
+    reader = Reader(uri, use_aicspylibczi=use_aicspylibczi)
+
+    # Act
+    reader.set_scene(scene)
+    metadata = reader.standard_metadata.to_dict()
+
+    # Sanity check
+    assert reader.current_scene_index == scene
+
+    # Assert
+    # Compare only values mentioned in "expected"
     for key, expected_value in expected.items():
         error_message = f"{key}: Expected: {expected_value}, Actual: {metadata[key]}"
         if isinstance(expected_value, float):
