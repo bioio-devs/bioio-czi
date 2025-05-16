@@ -145,13 +145,13 @@ class Reader(BaseReader):
         TypeError
             The provided value wasn't a string (scene id) or integer (scene index).
         """
-        # set_scene must be delegated to the implementation because that's where the
-        # scene ID is stored.
-        self._implementation.set_scene(scene_id)
         # We must reset properties on the top-level reader because some high-level
         # properties like xarray_dask_data are cached at the top level and only
         # indirectly delegated to the implementation.
         self._reset_self()
+        # set_scene must be delegated to the implementation because that's where the
+        # scene ID is stored.
+        self._implementation.set_scene(scene_id)
 
     @property
     def current_scene(self) -> str:
