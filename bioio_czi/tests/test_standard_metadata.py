@@ -139,7 +139,7 @@ from .conftest import LOCAL_RESOURCES_DIR
                 "Row": None,
                 "Timelapse": False,
                 "Timelapse Interval": None,  # Available only in aicspylibczi mode
-                "Total Time Duration": None,
+                "Total Time Duration": None,  # Available only in aicspylibczi mode
             },
         ),
     ],
