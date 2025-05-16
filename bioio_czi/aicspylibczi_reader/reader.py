@@ -963,6 +963,16 @@ class Reader(BaseReader):
         Optional[int]
             Timelapse interval in milliseconds. Returns None if extraction fails.
         """
+        # The purpose of this conditional is to not log a warning for files with a
+        # single timepoint.
+        timepoints = (
+            self.dims[DimensionNames.Time][0]
+            if DimensionNames.Time in self.dims.order
+            else None
+        )
+        if timepoints is None or timepoints < 2:
+            return None
+
         try:
             with self._fs.open(self._path) as open_resource:
                 czi = CziFile(open_resource.f)

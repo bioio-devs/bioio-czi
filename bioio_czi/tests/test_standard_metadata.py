@@ -62,7 +62,7 @@ from .conftest import LOCAL_RESOURCES_DIR
                 "Position Index": None,
                 "Row": None,
                 "Timelapse": False,
-                "Timelapse Interval": 0.0,
+                "Timelapse Interval": None,
                 # There's only one timepoint, but the 120 tiles were captured over the
                 # course of about 3 minutes.
                 "Total Time Duration": "187724.7372",
