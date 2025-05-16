@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, List, Tuple
+from typing import Any, List, Tuple, Union
 from xml.etree import ElementTree
 
 import xarray as xr
@@ -127,6 +127,39 @@ class Reader(BaseReader):
         >>> for i in range(len(image.scenes))
         """
         return self._implementation.scenes
+
+    def set_scene(self, scene_id: Union[str, int]) -> None:
+        """
+        Set the operating scene.
+
+        Parameters
+        ----------
+        scene_id: Union[str, int]
+            The scene id (if string) or scene index (if integer)
+            to set as the operating scene.
+
+        Raises
+        ------
+        IndexError
+            The provided scene id or index is not found in the available scene id list.
+        TypeError
+            The provided value wasn't a string (scene id) or integer (scene index).
+        """
+        # We must reset properties on the top-level reader because some high-level
+        # properties like xarray_dask_data are cached at the top level and only
+        # indirectly delegated to the implementation.
+        self._reset_self()
+        # set_scene must be delegated to the implementation because that's where the
+        # scene ID is stored.
+        self._implementation.set_scene(scene_id)
+
+    @property
+    def current_scene(self) -> str:
+        return self._implementation.current_scene
+
+    @property
+    def current_scene_index(self) -> int:
+        return self._implementation.current_scene_index
 
     def _read_delayed(self) -> xr.DataArray:
         """

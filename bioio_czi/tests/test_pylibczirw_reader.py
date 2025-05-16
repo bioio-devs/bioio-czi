@@ -92,6 +92,20 @@ from .conftest import LOCAL_RESOURCES_DIR
             None,
             (None, 1.0833333333333333, 1.0833333333333333),
         ),
+        (
+            "variable_per_scene_dims.czi",
+            "P2-D4",
+            ("P1-D4", "P2-D4"),
+            # The dimensions of the second scene are actually (1, 1, 2, 1248, 1848),
+            # but pylibczirw doesn't make that metadata available and instead assumes
+            # all scenes have the same shape.
+            # This is a known defect of pylibczirw mode.
+            (2, 1, 2, 1248, 1848),
+            np.uint16,
+            "TCZYX",
+            ["CMDRP"],
+            (2.23, 0.5416666666666666, 0.5416666666666666),
+        ),
         pytest.param(
             "variable_scene_shape_first_scene_pyramid.czi",
             "A1",

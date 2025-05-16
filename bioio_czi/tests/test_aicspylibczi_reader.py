@@ -129,6 +129,16 @@ def test_subblocks(filename: str, num_subblocks: int, acquistion_time: str) -> N
             None,
             (None, 1.0833333333333333, 1.0833333333333333),
         ),
+        (
+            "variable_per_scene_dims.czi",
+            "P2-D4",
+            ("P1-D4", "P2-D4"),
+            (1, 1, 2, 1248, 1848),  # different from the first scene
+            np.uint16,
+            "TCZYX",
+            ["CMDRP"],
+            (2.23, 0.5416666666666666, 0.5416666666666666),
+        ),
         pytest.param(
             "variable_scene_shape_first_scene_pyramid.czi",
             "A1",

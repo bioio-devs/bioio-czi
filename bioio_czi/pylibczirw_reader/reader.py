@@ -136,10 +136,14 @@ class Reader(BaseReader):
                     f"Expected 1 scene for index '{scene_index}' "
                     "but found {len(scene_info)}."
                 )
-            scene_name = scene_info[0].attrib["Name"]
-            if type(scene_name) != str:
-                # Fall back to index if name is raw bytes
-                return str(scene_index)
+            scene_name = scene_info[0].get("Name")
+            if scene_name is None:
+                scene_name = str(scene_index)
+            shape_info = scene_info[0].find("Shape")
+            if shape_info is not None:
+                shape_name = shape_info.get("Name")
+                if shape_name is not None:
+                    return f"{scene_name}-{shape_name}"
             return scene_name
 
         if self._scenes is None:
