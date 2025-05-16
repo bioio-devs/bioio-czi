@@ -37,9 +37,11 @@ def _extract_acquisition_time_from_subblock_metadata(
     return None
 
 
-def _acquisition_time(czi: CziFile, which_subblock: int) -> Optional[np.datetime64]:
+def _acquisition_time(
+    czi: CziFile, scene: int, which_subblock: int
+) -> Optional[np.datetime64]:
     subblock_metadata = czi.read_subblock_metadata(
-        Z=0, C=0, T=which_subblock, R=0, S=0, I=0, H=0, V=0
+        Z=0, C=0, T=which_subblock, R=0, S=scene, I=0, H=0, V=0
     )
     if not subblock_metadata:
         return None
@@ -56,25 +58,27 @@ def _difference_in_ms(start_time: np.datetime64, end_time: np.datetime64) -> flo
 
 
 def time_between_subblocks(
-    czi: CziFile, start_subblock_index: int, end_subblock_index: int
+    czi: CziFile, current_scene: int, start_subblock_index: int, end_subblock_index: int
 ) -> Optional[float]:
     """Calculates the time between two subblocks in milliseconds."""
-    start_time = _acquisition_time(czi, start_subblock_index)
-    end_time = _acquisition_time(czi, end_subblock_index)
+    start_time = _acquisition_time(czi, current_scene, start_subblock_index)
+    end_time = _acquisition_time(czi, current_scene, end_subblock_index)
     if start_time is None or end_time is None:
         return None
     return _difference_in_ms(start_time, end_time)
 
 
-def elapsed_time_all_subblocks(czi: CziFile) -> Optional[float]:
+def elapsed_time_all_subblocks(czi: CziFile, current_scene: int) -> Optional[float]:
     """
     Looks at all subblocks in the first scene and calculates the time between the first
     and last.
 
     Parameters
     ----------
-    czi : CziFile
+    czi: CziFile
         The CziFile object to extract metadata from.
+    current_scene: int
+        Get the elapsed time from subblocks of just this scene.
 
     Returns
     -------
@@ -93,7 +97,7 @@ def elapsed_time_all_subblocks(czi: CziFile) -> Optional[float]:
         T=1 C=1: 2020-01-01 00:02:00.1234567
     The return value would be 60123.4567 (1 minute and 0.1234567 seconds).
     """
-    all_subblocks: list[tuple[dict, str]] = czi.read_subblock_metadata(S=0)
+    all_subblocks: list[tuple[dict, str]] = czi.read_subblock_metadata(S=current_scene)
     all_acquisition_times = [
         _extract_acquisition_time_from_subblock_metadata(metadata)
         for _, metadata in all_subblocks

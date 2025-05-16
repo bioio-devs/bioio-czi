@@ -158,6 +158,11 @@ class Reader(BaseReader):
 
         return self._mapped_dims
 
+    def _reset_self(self) -> None:
+        super()._reset_self()
+        self._mapped_dims = None
+        self._px_sizes = None
+
     @staticmethod
     def _fix_czi_dims(dims: str) -> str:
         return (
@@ -977,7 +982,10 @@ class Reader(BaseReader):
             with self._fs.open(self._path) as open_resource:
                 czi = CziFile(open_resource.f)
                 return time_between_subblocks(
-                    czi, start_subblock_index=0, end_subblock_index=1
+                    czi,
+                    self.current_scene_index,
+                    start_subblock_index=0,
+                    end_subblock_index=1,
                 )
 
         except Exception as exc:
@@ -1001,7 +1009,7 @@ class Reader(BaseReader):
         try:
             with self._fs.open(self._path) as open_resource:
                 czi = CziFile(open_resource.f)
-                duration = elapsed_time_all_subblocks(czi)
+                duration = elapsed_time_all_subblocks(czi, self.current_scene_index)
                 return str(duration) if duration is not None else None
 
         except Exception as exc:
