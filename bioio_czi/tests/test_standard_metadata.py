@@ -37,7 +37,10 @@ from .conftest import LOCAL_RESOURCES_DIR
                 "Row": "4",
                 "Timelapse": True,
                 "Timelapse Interval": 59927.0,
-                "Total Time Duration": "59927.0",
+                # Though this file has just 2 timepoints, duration is slightly longer
+                # than timelapse interval because it measures to the last acquisition of
+                # the last timepoint.
+                "Total Time Duration": "60273.0",
             },
         ),
         (
@@ -62,7 +65,9 @@ from .conftest import LOCAL_RESOURCES_DIR
                 "Row": None,
                 "Timelapse": False,
                 "Timelapse Interval": None,
-                "Total Time Duration": None,
+                # There's only one timepoint, but the 120 tiles were captured over the
+                # course of about 3 minutes.
+                "Total Time Duration": "187724.7372",
             },
         ),
         (
@@ -87,7 +92,7 @@ from .conftest import LOCAL_RESOURCES_DIR
                 "Row": None,
                 "Timelapse": True,
                 "Timelapse Interval": 19160.1933,
-                "Total Time Duration": "19160.1933",
+                "Total Time Duration": "28147.034",
             },
         ),
         (
@@ -172,7 +177,7 @@ def test_standard_metadata(
             {
                 "Image Size T": 2,
                 "Timelapse Interval": 59927.0,
-                "Total Time Duration": "59927.0",
+                "Total Time Duration": "60273.0",
             },
         ),
         (
@@ -182,7 +187,7 @@ def test_standard_metadata(
             {
                 "Image Size T": 1,
                 "Timelapse Interval": None,
-                "Total Time Duration": None,
+                "Total Time Duration": "343.0",
             },
         ),
         (
