@@ -35,19 +35,21 @@ def _extract_acquisition_time_from_subblock_metadata(
     return None
 
 
-def _acquisition_time(czi: CziFile, which_subblock: int) -> Optional[datetime.datetime]:
+def _acquisition_time(
+    czi: CziFile, scene: int, which_subblock: int
+) -> Optional[datetime.datetime]:
     subblock_metadata = czi.read_subblock_metadata(
-        Z=0, C=0, T=which_subblock, R=0, S=0, I=0, H=0, V=0
+        Z=0, C=0, T=which_subblock, R=0, S=scene, I=0, H=0, V=0
     )
     return _extract_acquisition_time_from_subblock_metadata(subblock_metadata)
 
 
 def time_between_subblocks(
-    czi: CziFile, start_subblock_index: int, end_subblock_index: int
+    czi: CziFile, current_scene: int, start_subblock_index: int, end_subblock_index: int
 ) -> Optional[float]:
     """Calculates the time between two subblocks in milliseconds."""
-    start_time = _acquisition_time(czi, start_subblock_index)
-    end_time = _acquisition_time(czi, end_subblock_index)
+    start_time = _acquisition_time(czi, current_scene, start_subblock_index)
+    end_time = _acquisition_time(czi, current_scene, end_subblock_index)
 
     if start_time is not None and end_time is not None:
         delta = end_time - start_time
