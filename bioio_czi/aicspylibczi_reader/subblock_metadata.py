@@ -46,6 +46,8 @@ def _acquisition_time(
     if not subblock_metadata:
         return None
 
+    # subblock_metadata should be a list of length 1 whose only element is a tuple:
+    # ({ Z=0, C=0, T=which_subblock, R=0, S=scene, I=0, H=0, V=0 }, metadata_string)
     metablock_of_first_subblock = subblock_metadata[0][1]
     return _extract_acquisition_time_from_subblock_metadata(metablock_of_first_subblock)
 
