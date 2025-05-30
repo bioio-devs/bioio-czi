@@ -5,7 +5,9 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Python 3.10–3.13](https://img.shields.io/badge/python-3.10--3.13-blue.svg)](https://www.python.org/downloads/)
 
-A BioIO reader plugin for reading CZIs using `pylibczirw` (default) or `aicspylibczi`
+A BioIO reader plugin for reading CZIs using `pylibczirw` (default) or `aicspylibczi`.
+This plugin attempts to follow the latest specification for the CZI file format from
+Carl Zeiss Microscopy ([currently v1.2](./docs/2024_06_02_DS_ZISRAW-FileFormat.pdf)).
 
 ---
 
