@@ -102,6 +102,8 @@ ignore = [
   "Justfile",
   ".cookiecutter.yaml",
   "scripts/*",
+  # Excluded to keep the package size down
+  "docs/*.pdf",
 ]
 
 [tool.mypy]
