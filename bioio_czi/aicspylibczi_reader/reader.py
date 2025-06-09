@@ -93,8 +93,12 @@ class Reader(BaseReader):
             with fs.open(path) as open_resource:
                 CziFile(open_resource.f)
                 return True
-        except RuntimeError:
-            return False
+        except RuntimeError as e:
+            raise exceptions.UnsupportedFileFormatError(
+                "bioio-czi[aicspylibczi mode]",
+                path,
+                str(e),
+            )
 
     def __init__(
         self,

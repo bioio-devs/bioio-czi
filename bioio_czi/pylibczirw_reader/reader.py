@@ -88,8 +88,12 @@ class Reader(BaseReader):
         try:
             with open(path):
                 return True
-        except RuntimeError:
-            return False
+        except RuntimeError as e:
+            raise exceptions.UnsupportedFileFormatError(
+                "bioio-czi[pylibczi mode]",
+                path,
+                str(e),
+            )
 
     def __init__(self, image: types.PathLike, fs_kwargs: Dict[str, Any] = {}) -> None:
         path = str(image)
