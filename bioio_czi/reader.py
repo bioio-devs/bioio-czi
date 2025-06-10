@@ -7,9 +7,9 @@ from xml.etree import ElementTree
 
 import xarray as xr
 from bioio_base.dimensions import Dimensions
+from bioio_base.exceptions import UnsupportedFileFormatError
 from bioio_base.reader import Reader as BaseReader
 from bioio_base.types import PathLike, PhysicalPixelSizes
-from bioio_base.exceptions import UnsupportedFileFormatError
 from fsspec import AbstractFileSystem
 from ome_types.model.ome import OME
 
@@ -70,23 +70,19 @@ class Reader(BaseReader):
         """
         errors = []
         try:
-            if PylibCziReader._is_supported_image(
-                fs, path, **kwargs
-            ):
+            if PylibCziReader._is_supported_image(fs, path, **kwargs):
                 return True
         except Exception as e:
             errors.append(f"PylibCziReader: {str(e)}")
         try:
-            if AicsPyLibCziReader._is_supported_image(
-                fs, path, **kwargs
-            ):
+            if AicsPyLibCziReader._is_supported_image(fs, path, **kwargs):
                 return True
         except Exception as e:
             errors.append(f"AicsPyLibCziReader: {str(e)}")
-        error_message = (', ').join(errors)
+        error_message = (", ").join(errors)
         raise UnsupportedFileFormatError(
-                reader_name="bioio-czi ", path=path, msg_extra=error_message
-            )
+            reader_name="bioio-czi ", path=path, msg_extra=error_message
+        )
 
     def __init__(
         self, image: PathLike, use_aicspylibczi: bool = False, **kwargs: Any
