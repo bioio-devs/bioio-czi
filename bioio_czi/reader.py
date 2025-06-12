@@ -73,12 +73,12 @@ class Reader(BaseReader):
             if PylibCziReader._is_supported_image(fs, path, **kwargs):
                 return True
         except Exception as e:
-            errors.append(f"PylibCziReader: {str(e)}")
+            errors.append(str(e))
         try:
             if AicsPyLibCziReader._is_supported_image(fs, path, **kwargs):
                 return True
         except Exception as e:
-            errors.append(f"AicsPyLibCziReader: {str(e)}")
+            errors.append(str(e))
         error_message = (", ").join(errors)
         raise UnsupportedFileFormatError(
             reader_name="bioio-czi ", path=path, msg_extra=error_message
