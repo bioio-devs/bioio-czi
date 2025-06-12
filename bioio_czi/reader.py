@@ -2,16 +2,18 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, List, Tuple
+from typing import Any, List, Tuple, Union
 from xml.etree import ElementTree
 
 import xarray as xr
 from bioio_base.dimensions import Dimensions
 from bioio_base.reader import Reader as BaseReader
-from bioio_base.types import PathLike, PhysicalPixelSizes
+from bioio_base.standard_metadata import StandardMetadata
+from bioio_base.types import PathLike, PhysicalPixelSizes, TimeInterval
 from fsspec import AbstractFileSystem
-from ome_types.model.ome import OME
+from ome_types.model import OME
 
+from bioio_czi import standard_metadata
 from bioio_czi.aicspylibczi_reader.reader import Reader as AicsPyLibCziReader
 from bioio_czi.pylibczirw_reader.reader import Reader as PylibCziReader
 
@@ -125,6 +127,39 @@ class Reader(BaseReader):
         >>> for i in range(len(image.scenes))
         """
         return self._implementation.scenes
+
+    def set_scene(self, scene_id: Union[str, int]) -> None:
+        """
+        Set the operating scene.
+
+        Parameters
+        ----------
+        scene_id: Union[str, int]
+            The scene id (if string) or scene index (if integer)
+            to set as the operating scene.
+
+        Raises
+        ------
+        IndexError
+            The provided scene id or index is not found in the available scene id list.
+        TypeError
+            The provided value wasn't a string (scene id) or integer (scene index).
+        """
+        # We must reset properties on the top-level reader because some high-level
+        # properties like xarray_dask_data are cached at the top level and only
+        # indirectly delegated to the implementation.
+        self._reset_self()
+        # set_scene must be delegated to the implementation because that's where the
+        # scene ID is stored.
+        self._implementation.set_scene(scene_id)
+
+    @property
+    def current_scene(self) -> str:
+        return self._implementation.current_scene
+
+    @property
+    def current_scene_index(self) -> int:
+        return self._implementation.current_scene_index
 
     def _read_delayed(self) -> xr.DataArray:
         """
@@ -343,3 +378,45 @@ class Reader(BaseReader):
             The image has no mosaic dimension available.
         """
         return self._implementation.get_mosaic_tile_positions(**kwargs)
+
+    @property
+    def time_interval(self) -> TimeInterval:
+        """
+        Extracts the time interval between the first two time points in milliseconds.
+        Returns
+        -------
+        Optional[float]
+            Timelapse interval in milliseconds. Returns None if extraction fails.
+        """
+        return self._implementation.time_interval
+
+    @property
+    def standard_metadata(self) -> StandardMetadata:
+        """
+        Return the standard metadata for this reader, updating specific fields.
+        This implementation calls the base reader's standard_metadata property
+        via super() and then assigns the new values.
+        """
+        # 1. Some of the standard metadata can be read from all bioio Readers in the
+        # same way, which the following super() call does. For instance,
+        # standard_metadata.timelapse_interval is set to self.time_interval.
+        metadata = super().standard_metadata
+
+        # 2. Most of the remaining implementation is identical across pylibczirw and
+        # aicspylibczi modes, so it is shared here. The self-contained standard_metadata
+        # module holds the implementation for extracting these from the metadata.
+        metadata.binning = standard_metadata.binning(self.ome_metadata)
+        metadata.column = standard_metadata.column(
+            self.metadata, self.current_scene_index
+        )
+        metadata.imaged_by = standard_metadata.imaged_by(self.ome_metadata)
+        metadata.imaging_date = standard_metadata.imaging_date(self.ome_metadata)
+        metadata.objective = standard_metadata.objective(self.ome_metadata)
+        metadata.position_index = standard_metadata.position_index(self.current_scene)
+        metadata.row = standard_metadata.row(self.metadata, self.current_scene_index)
+
+        # 3. Finally, total_time_duration is mode-specific, as only aicspylibczi mode
+        # has access to the necessary subblock metadata.
+        metadata.total_time_duration = self._implementation.total_time_duration
+
+        return metadata
