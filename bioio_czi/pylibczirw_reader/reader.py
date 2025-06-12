@@ -91,7 +91,7 @@ class Reader(BaseReader):
                 return True
         except RuntimeError as e:
             raise exceptions.UnsupportedFileFormatError(
-                "bioio-czi[pylibczi mode]",
+                "bioio-czi[pylibczirw mode]",
                 path,
                 str(e),
             )
