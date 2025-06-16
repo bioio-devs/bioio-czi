@@ -1,6 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
 import logging
 import xml.etree.ElementTree as ET
 from copy import copy
@@ -30,6 +27,7 @@ from .. import metadata as metadata_utils
 from ..bounding_box import size
 from ..channels import get_channel_names
 from ..pixel_sizes import get_physical_pixel_sizes
+from .subblock_metadata import time_between_subblocks
 
 ###############################################################################
 
@@ -53,9 +51,6 @@ PIXEL_DICT = {
     "bgr48": np.uint16,
     "invalid": np.uint8,
 }
-
-
-###############################################################################
 
 
 class Reader(BaseReader):
@@ -166,6 +161,11 @@ class Reader(BaseReader):
                 self._mapped_dims = Reader._fix_czi_dims(czi.dims)
 
         return self._mapped_dims
+
+    def _reset_self(self) -> None:
+        super()._reset_self()
+        self._mapped_dims = None
+        self._px_sizes = None
 
     @staticmethod
     def _fix_czi_dims(dims: str) -> str:
@@ -962,3 +962,77 @@ class Reader(BaseReader):
                 m_indexes_to_mosaic_positions[m_index]
                 for m_index in sorted(m_indexes_to_mosaic_positions.keys())
             ]
+
+    @property
+    def time_interval(self) -> types.TimeInterval:
+        """
+        Extracts the time interval between the first two time points in milliseconds.
+        Returns
+        -------
+        Optional[int]
+            Timelapse interval in milliseconds. Returns None if extraction fails.
+        """
+        # The purpose of this conditional is to not log a warning for files with a
+        # single timepoint.
+        timepoints = (
+            self.dims[DimensionNames.Time][0]
+            if DimensionNames.Time in self.dims.order
+            else None
+        )
+        if timepoints is None or timepoints < 2:
+            return None
+
+        try:
+            with self._fs.open(self._path) as open_resource:
+                czi = CziFile(open_resource.f)
+                return time_between_subblocks(
+                    czi,
+                    self.current_scene_index,
+                    start_frame=0,
+                    end_frame=1,
+                )
+
+        except Exception as exc:
+            log.warning("Failed to extract Timelapse Interval: %s", exc, exc_info=True)
+
+        return None
+
+    @property
+    def total_time_duration(self) -> Optional[str]:
+        """
+        Extracts the total duration of the timelapse in milliseconds.
+        This is the time between the first acquisition and the first acquisition of the
+        last timepoint.
+
+        Returns
+        -------
+        Optional[str]
+            Total time duration in milliseconds, as a string. The return value is a
+            string to satisfy the StandardMetadata contract.
+            Returns None if extraction fails.
+        """
+        timepoints = (
+            self.dims[DimensionNames.Time][0]
+            if DimensionNames.Time in self.dims.order
+            else None
+        )
+        if timepoints is None or timepoints < 2:
+            return None
+
+        try:
+            with self._fs.open(self._path) as open_resource:
+                czi = CziFile(open_resource.f)
+                duration = time_between_subblocks(
+                    czi,
+                    self.current_scene_index,
+                    start_frame=0,
+                    # Index of the last timepoint is one less than the number of
+                    # timepoints
+                    end_frame=timepoints - 1,
+                )
+                return str(duration) if duration is not None else None
+
+        except Exception as exc:
+            log.warning("Failed to extract Total Time Duration: %s", exc, exc_info=True)
+
+        return None

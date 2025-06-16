@@ -36,9 +36,18 @@ Install bioio-czi alongside bioio:
 | Read CZIs from the internet | ✅ | ❌ |
 | Read single tile from tiled CZI | ❌ | ✅ |
 | Read single tile's metadata from tiled CZI | ❌ | ✅ |
+| Read elapsed time metadata* | ❌ | ✅ |
+| Handle CZIs with different dimensions per scene** | ❌ | ✅ |
 | Read stitched mosaic of a tiled CZI | ✅ | ✅ |
 
 The primary difference is that `pylibczirw` supports reading CZIs over the internet but cannot access individual tiles from a tiled CZI. To use `aicspylibczi`, add the `use_aicspylibczi=True` parameter when creating a reader. For example: `from bioio import BioImage; img = BioImage(..., use_aicspylibczi=True)`.
+
+*Elapsed time metadata include the following. These are derived from individual subblock metadata.
+* `BioImage(...).time_interval`
+* `BioImage(...).standard_metadata.timelapse_interval`
+* `BioImage(...).standard_metadata.total_time_duration`
+
+**The underlying pylibczirw reader assumes that each scene has the same dimension. Files that do not meet this requirement may be read incorrectly in pylibczirw mode.
 
 ## Example Usage (see full documentation for more examples)
 
