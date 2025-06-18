@@ -1,11 +1,10 @@
 import os
 from pathlib import Path
-from typing import Optional, Union
+from typing import Union
 from xml.etree import ElementTree as ET
 
 import lxml.etree
 from bioio_base.types import PathLike
-from lxml.etree import XML, _Element
 from ome_types import OME
 
 OME_NS = {"": "http://www.openmicroscopy.org/Schemas/OME/2016-06"}
@@ -82,12 +81,6 @@ def generate_ome_instrument_id(instrument_id: Union[str, int]) -> str:
         The OME standard for instrument IDs.
     """
     return f"Instrument:{instrument_id}"
-
-
-def get_metadata_element(ome_metadata: OME, path: str) -> Optional[_Element]:
-    """Gets the first occurrence of the given XML path if one exists."""
-    xml = XML(ome_metadata.to_xml())
-    return xml.find(path, OME_NS)
 
 
 def generate_ome_detector_id(detector_id: Union[str, int]) -> str:
