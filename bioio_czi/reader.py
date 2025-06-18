@@ -405,13 +405,9 @@ class Reader(BaseReader):
         # 2. Most of the remaining implementation is identical across pylibczirw and
         # aicspylibczi modes, so it is shared here. The self-contained standard_metadata
         # module holds the implementation for extracting these from the metadata.
-        metadata.binning = standard_metadata.binning(self.ome_metadata)
         metadata.column = standard_metadata.column(
             self.metadata, self.current_scene_index
         )
-        metadata.imaged_by = standard_metadata.imaged_by(self.ome_metadata)
-        metadata.imaging_date = standard_metadata.imaging_date(self.ome_metadata)
-        metadata.objective = standard_metadata.objective(self.ome_metadata)
         metadata.position_index = standard_metadata.position_index(self.current_scene)
         metadata.row = standard_metadata.row(self.metadata, self.current_scene_index)
 
