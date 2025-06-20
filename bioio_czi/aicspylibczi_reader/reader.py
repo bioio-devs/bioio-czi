@@ -88,8 +88,12 @@ class Reader(BaseReader):
             with fs.open(path) as open_resource:
                 CziFile(open_resource.f)
                 return True
-        except RuntimeError:
-            return False
+        except RuntimeError as e:
+            raise exceptions.UnsupportedFileFormatError(
+                "bioio-czi[aicspylibczi mode]",
+                path,
+                str(e),
+            )
 
     def __init__(
         self,
@@ -984,8 +988,8 @@ class Reader(BaseReader):
                 return time_between_subblocks(
                     czi,
                     self.current_scene_index,
-                    start_subblock_index=0,
-                    end_subblock_index=1,
+                    start_frame=0,
+                    end_frame=1,
                 )
 
         except Exception as exc:
@@ -1007,22 +1011,24 @@ class Reader(BaseReader):
             string to satisfy the StandardMetadata contract.
             Returns None if extraction fails.
         """
+        timepoints = (
+            self.dims[DimensionNames.Time][0]
+            if DimensionNames.Time in self.dims.order
+            else None
+        )
+        if timepoints is None or timepoints < 2:
+            return None
+
         try:
             with self._fs.open(self._path) as open_resource:
                 czi = CziFile(open_resource.f)
-
-                # Get the number of time points (SizeT)
-                size_t_element = czi.meta.find(".//SizeT")
-                if size_t_element is None or not size_t_element.text:
-                    return None
-
-                last_timepoint = int(size_t_element.text) - 1
-
                 duration = time_between_subblocks(
                     czi,
                     self.current_scene_index,
-                    start_subblock_index=0,
-                    end_subblock_index=last_timepoint,
+                    start_frame=0,
+                    # Index of the last timepoint is one less than the number of
+                    # timepoints
+                    end_frame=timepoints - 1,
                 )
                 return str(duration) if duration is not None else None
 

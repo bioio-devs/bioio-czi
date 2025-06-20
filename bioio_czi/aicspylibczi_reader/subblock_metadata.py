@@ -37,27 +37,40 @@ def _extract_acquisition_time_from_subblock_metadata(
     return None
 
 
-def _acquisition_time(
-    czi: CziFile, scene: int, which_subblock: int
-) -> Optional[np.datetime64]:
-    subblock_metadata = czi.read_subblock_metadata(
-        Z=0, C=0, T=which_subblock, R=0, S=scene, I=0, H=0, V=0
+def _acquisition_time(czi: CziFile, scene: int, frame: int) -> Optional[np.datetime64]:
+    """Get the time of the first acquisition in the given scene at the given frame."""
+    subblocks_at_t: list[tuple[dict, str]] = czi.read_subblock_metadata(
+        T=frame, S=scene
     )
-    if not subblock_metadata:
-        return None
 
-    # subblock_metadata should be a list of length 1 whose only element is a tuple:
+    # subblocks_at_t is a list whose element are tuples of the form:
     # ({ Z=0, C=0, T=which_subblock, R=0, S=scene, I=0, H=0, V=0 }, metadata_string)
-    metablock_of_first_subblock = subblock_metadata[0][1]
-    return _extract_acquisition_time_from_subblock_metadata(metablock_of_first_subblock)
+    acquisition_times = [
+        _extract_acquisition_time_from_subblock_metadata(metadata)
+        for _, metadata in subblocks_at_t
+    ]
+    # NaT is numpy's representation of "Not a Time", which is used when parsing fails.
+    filtered_acquisition_times = [
+        t for t in acquisition_times if t is not None and t is not np.datetime64("NaT")
+    ]
+
+    if len(filtered_acquisition_times) == 0:
+        return None
+    # One timepoint has many acquisitions (e.g., different channels, different Z
+    # positions): the "acquisition time" of the timepoint is the start of the first
+    # acquisition.
+    return np.min(filtered_acquisition_times)
 
 
 def time_between_subblocks(
-    czi: CziFile, current_scene: int, start_subblock_index: int, end_subblock_index: int
+    czi: CziFile, current_scene: int, start_frame: int, end_frame: int
 ) -> Optional[float]:
-    """Calculates the time between two subblocks in milliseconds."""
-    start_time = _acquisition_time(czi, current_scene, start_subblock_index)
-    end_time = _acquisition_time(czi, current_scene, end_subblock_index)
+    """
+    Calculates the time from the first acquisition of start_frame to the first
+    acquisition of end_frame in milliseconds. Only the given scene is considered.
+    """
+    start_time = _acquisition_time(czi, current_scene, start_frame)
+    end_time = _acquisition_time(czi, current_scene, end_frame)
     if start_time is None or end_time is None:
         return None
     delta = end_time - start_time

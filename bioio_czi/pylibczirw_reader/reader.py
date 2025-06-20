@@ -69,7 +69,7 @@ class Reader(BaseReader):
         **kwargs: Any,
     ) -> bool:
         """
-        Check if file is a supported CZI by attempting to open it. This is a
+        Check if file is a supported CZI by attempting to open it.
 
         Parameters
         ----------
@@ -83,13 +83,18 @@ class Reader(BaseReader):
         Returns
         -------
         supported: bool
-            Boolean value indicating if the file is supported by the reader.
+            Boolean value indicating if the file is supported by the reader,
+            or raises an exception if it is not.
         """
         try:
             with open(path):
                 return True
-        except RuntimeError:
-            return False
+        except RuntimeError as e:
+            raise exceptions.UnsupportedFileFormatError(
+                "bioio-czi[pylibczirw mode]",
+                path,
+                str(e),
+            )
 
     def __init__(self, image: types.PathLike, fs_kwargs: Dict[str, Any] = {}) -> None:
         path = str(image)
