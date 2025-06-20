@@ -1,3 +1,4 @@
+import datetime
 from typing import Any
 
 import pytest
@@ -28,8 +29,10 @@ from .conftest import LOCAL_RESOURCES_DIR
                 "Image Size Y": 1248,
                 "Image Size Z": 2,
                 "Imaged By": "sara.carlson",
-                "Imaging Date": "2020-01-17",
-                "Objective": "10x/0.45",
+                "Imaging Datetime": datetime.datetime(
+                    2020, 1, 18, 0, 16, 29, 771361, tzinfo=datetime.timezone.utc
+                ),
+                "Objective": "10x/0.45Air",
                 "Pixel Size X": 0.5416666666666666,
                 "Pixel Size Y": 0.5416666666666666,
                 "Pixel Size Z": 2.23,
@@ -53,8 +56,10 @@ from .conftest import LOCAL_RESOURCES_DIR
                 "Image Size Y": 440,
                 "Image Size Z": None,
                 "Imaged By": "M1SRH",
-                "Imaging Date": "2016-03-11",
-                "Objective": None,
+                "Imaging Datetime": datetime.datetime(
+                    2016, 3, 11, 10, 23, 44, 925154, tzinfo=datetime.timezone.utc
+                ),
+                "Objective": "5x/0.35Air",
                 "Pixel Size X": 4.5743626119409,
                 "Pixel Size Y": 4.5743626119409,
                 "Pixel Size Z": None,
@@ -78,8 +83,10 @@ from .conftest import LOCAL_RESOURCES_DIR
                 "Image Size Y": 256,
                 "Image Size Z": 3,
                 "Imaged By": "M1SRH",
-                "Imaging Date": "2021-06-14",
-                "Objective": None,
+                "Imaging Datetime": datetime.datetime(
+                    2021, 6, 15, 6, 14, 13, 823569, tzinfo=datetime.timezone.utc
+                ),
+                "Objective": "5x/0.35Air",
                 "Pixel Size X": 0.4,
                 "Pixel Size Y": 0.4,
                 "Pixel Size Z": 1.0,
@@ -103,8 +110,10 @@ from .conftest import LOCAL_RESOURCES_DIR
                 "Image Size Y": 1248,
                 "Image Size Z": 2,
                 "Imaged By": "sara.carlson",
-                "Imaging Date": "2020-01-17",
-                "Objective": "10x/0.45",
+                "Imaging Datetime": datetime.datetime(
+                    2020, 1, 18, 0, 16, 29, 771361, tzinfo=datetime.timezone.utc
+                ),
+                "Objective": "10x/0.45Air",
                 "Pixel Size X": 0.5416666666666666,
                 "Pixel Size Y": 0.5416666666666666,
                 "Pixel Size Z": 2.23,
@@ -130,8 +139,10 @@ from .conftest import LOCAL_RESOURCES_DIR
                 "Image Size Y": 3212,
                 "Image Size Z": None,
                 "Imaged By": "M1SRH",
-                "Imaging Date": "2016-03-11",
-                "Objective": None,
+                "Imaging Datetime": datetime.datetime(
+                    2016, 3, 11, 10, 23, 44, 925154, tzinfo=datetime.timezone.utc
+                ),
+                "Objective": "5x/0.35Air",
                 "Pixel Size X": 4.5743626119409,
                 "Pixel Size Y": 4.5743626119409,
                 "Pixel Size Z": None,
