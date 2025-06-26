@@ -1,6 +1,7 @@
 import logging
 import xml.etree.ElementTree as ET
 from copy import copy
+from datetime import timedelta
 from pathlib import Path
 from typing import Any, Dict, Hashable, List, Optional, Tuple, Union
 
@@ -964,14 +965,18 @@ class Reader(BaseReader):
             ]
 
     @property
-    def time_interval(self) -> types.TimeInterval:
+    def time_interval(self) -> Optional[timedelta]:
         """
-        Extracts the time interval between the first two time points in milliseconds.
+        Extracts the the average time interval between consecutive timepoints
+        as a timedelta object.
+
         Returns
         -------
-        Optional[int]
-            Timelapse interval in milliseconds. Returns None if extraction fails.
+        Optional[timedelta]
+            Average interval between timepoints.
+            Returns None if total_time_duration is None or less than two timepoints.
         """
+
         # The purpose of this conditional is to not log a warning for files with a
         # single timepoint.
         timepoints = (
@@ -982,33 +987,22 @@ class Reader(BaseReader):
         if timepoints is None or timepoints < 2:
             return None
 
-        try:
-            with self._fs.open(self._path) as open_resource:
-                czi = CziFile(open_resource.f)
-                return time_between_subblocks(
-                    czi,
-                    self.current_scene_index,
-                    start_frame=0,
-                    end_frame=1,
-                )
-
-        except Exception as exc:
-            log.warning("Failed to extract Timelapse Interval: %s", exc, exc_info=True)
-
-        return None
+        total_duration = self.total_time_duration
+        if total_duration is None:
+            return None
+        return total_duration / (timepoints - 1)
 
     @property
-    def total_time_duration(self) -> Optional[str]:
+    def total_time_duration(self) -> Optional[timedelta]:
         """
-        Extracts the total duration of the timelapse in milliseconds.
+        Extracts the total duration of the timelapse as a timedelta object.
         This is the time between the first acquisition and the first acquisition of the
         last timepoint.
 
         Returns
         -------
-        Optional[str]
-            Total time duration in milliseconds, as a string. The return value is a
-            string to satisfy the StandardMetadata contract.
+        Optional[timedelta]
+            Total time duration as a timedelta object.
             Returns None if extraction fails.
         """
         timepoints = (
@@ -1022,7 +1016,7 @@ class Reader(BaseReader):
         try:
             with self._fs.open(self._path) as open_resource:
                 czi = CziFile(open_resource.f)
-                duration = time_between_subblocks(
+                duration_ms = time_between_subblocks(
                     czi,
                     self.current_scene_index,
                     start_frame=0,
@@ -1030,7 +1024,11 @@ class Reader(BaseReader):
                     # timepoints
                     end_frame=timepoints - 1,
                 )
-                return str(duration) if duration is not None else None
+                return (
+                    timedelta(milliseconds=duration_ms)
+                    if duration_ms is not None
+                    else None
+                )
 
         except Exception as exc:
             log.warning("Failed to extract Total Time Duration: %s", exc, exc_info=True)

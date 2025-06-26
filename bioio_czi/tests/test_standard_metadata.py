@@ -39,8 +39,8 @@ from .conftest import LOCAL_RESOURCES_DIR
                 "Position Index": 1,
                 "Row": "4",
                 "Timelapse": True,
-                "Timelapse Interval": 59927.0,
-                "Total Time Duration": "59927.0",
+                "Timelapse Interval": datetime.timedelta(milliseconds=59927.0),
+                "Total Time Duration": datetime.timedelta(milliseconds=59927.0),
             },
         ),
         (
@@ -93,8 +93,8 @@ from .conftest import LOCAL_RESOURCES_DIR
                 "Position Index": None,
                 "Row": None,
                 "Timelapse": True,
-                "Timelapse Interval": 19160.1933,
-                "Total Time Duration": "19160.1933",
+                "Timelapse Interval": datetime.timedelta(milliseconds=19160.1933),
+                "Total Time Duration": datetime.timedelta(milliseconds=19160.1933),
             },
         ),
         (
@@ -182,8 +182,8 @@ def test_standard_metadata(
             0,
             {
                 "Image Size T": 2,
-                "Timelapse Interval": 59927.0,
-                "Total Time Duration": "59927.0",
+                "Timelapse Interval": datetime.timedelta(milliseconds=59927.0),
+                "Total Time Duration": datetime.timedelta(milliseconds=59927.0),
             },
         ),
         (

@@ -426,6 +426,7 @@ class Reader(BaseReader):
 
         # 3. Finally, total_time_duration is mode-specific, as only aicspylibczi mode
         # has access to the necessary subblock metadata.
+        metadata.timelapse_interval = self.time_interval
         metadata.total_time_duration = self._implementation.total_time_duration
 
         return metadata
