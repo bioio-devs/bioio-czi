@@ -3,4 +3,4 @@ recursive-include bioio_czi/czi-to-ome-xslt *
 exclude bioio_czi/czi-to-ome-xslt/.git
 include .gitmodules
 
-exclude bioio_ome_tiff/tests/** 
+exclude bioio_czi/tests/** 
