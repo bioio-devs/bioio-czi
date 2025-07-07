@@ -48,6 +48,7 @@ jobs:
       with:
         submodules: "recursive"
         lfs: true # For test files
+    - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
