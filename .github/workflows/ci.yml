@@ -39,9 +39,6 @@ jobs:
       matrix:
         python-version: ["3.10", 3.11, 3.12, 3.13]
         os: [ubuntu-latest, macOS-latest, windows-latest]
-    env:
-      BUCKET_NAME : "bioio-dev-test-resources"
-      AWS_REGION : "us-west-2"
     permissions:
       id-token: write   # This is required for requesting the JWT
       contents: read    # This is required for actions/checkout
@@ -50,11 +47,7 @@ jobs:
     - uses: actions/checkout@v4
       with:
         submodules: "recursive"
-    - uses: aws-actions/configure-aws-credentials@v4
-      with:
-        role-to-assume: arn:aws:iam::978220035532:role/bioio_github
-        role-session-name: bioio-czi-${{ github.sha }}
-        aws-region: ${{ env.AWS_REGION }}
+        lfs: true # For test files
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
@@ -66,15 +59,6 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install .[test]
-    - uses: actions/cache@v4
-      id: cache
-      with:
-        path: bioio_czi/tests/resources
-        key: ${{ hashFiles('scripts/TEST_RESOURCES_HASH.txt') }}
-    - name: Download Test Resources
-      if: steps.cache.outputs.cache-hit != 'true'
-      run: |
-          python scripts/download_test_resources.py --debug
     - name: Run Tests
       run: just test
     - name: Upload Codecov
