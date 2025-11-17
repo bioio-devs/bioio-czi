@@ -39,7 +39,6 @@ PIXEL_DICT = {
 }
 
 
-
 class Reader(BaseReader):
     """
     Wraps the pylibczirw API to provide the same BioIO Reader plugin for
