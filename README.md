@@ -47,7 +47,7 @@ The primary difference is that `pylibczirw` supports reading CZIs over the inter
 * `BioImage(...).standard_metadata.timelapse_interval`
 * `BioImage(...).standard_metadata.total_time_duration`
 
-**The underlying pylibczirw reader assumes that each scene has the same dimension. Files that do not meet this requirement may be read incorrectly in pylibczirw mode.
+**The underlying pylibczirw reader only exposes per-scene X and Y dimensions. Files that do not have consistent dimensions per scene may be read incorrectly in pylibczirw mode.
 
 ## Example Usage (see full documentation for more examples)
 
