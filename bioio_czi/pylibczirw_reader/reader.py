@@ -28,13 +28,13 @@ from ..pixel_sizes import get_physical_pixel_sizes
 log = logging.getLogger(__name__)
 
 PIXEL_DICT = {
-    "Gray8": np.uint8,
-    "Gray16": np.uint16,
-    "Gray32": np.uint32,  # Not supported by underlying pylibCZIrw
-    "Gray32Float": np.float32,
-    "Bgr24": np.uint8,
-    "Bgr48": np.uint16,
-    "Bgr96Float": np.float32,  # Supported by pylibCZIrw but not tested in this plugin
+    "gray8": np.uint8,
+    "gray16": np.uint16,
+    "gray32": np.uint32,  # Not supported by underlying pylibCZIrw
+    "gray32float": np.float32,
+    "bgr24": np.uint8,
+    "bgr48": np.uint16,
+    "bgr96float": np.float32,  # Supported by pylibCZIrw but not tested in this plugin
     "invalid": np.uint8,
 }
 
@@ -312,7 +312,7 @@ class Reader(BaseReader):
             lazy_arrays[np_index] = da.from_delayed(
                 delayed(self._array_builder(non_yx_dims))(np_index),
                 chunk_shape,
-                dtype=PIXEL_DICT[self._pixel_types[0]],
+                dtype=PIXEL_DICT[self._pixel_types[0].lower()],
             )
 
         # 6. Package chunks and metadata into a DataArray
