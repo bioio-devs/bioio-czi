@@ -10,6 +10,7 @@ from _aicspylibczi import PylibCZI_CDimCoordinatesOverspecifiedException
 from bioio_base import dimensions, exceptions, test_utilities
 
 from bioio_czi import Reader
+from bioio_czi.aicspylibczi_reader.reader import Reader as AicsPyLibCziReader
 
 from .conftest import LOCAL_RESOURCES_DIR
 
@@ -425,3 +426,56 @@ def test_czi_reader_mosaic_coords(
         reader.mosaic_xarray_dask_data.coords[dimensions.DimensionNames.SpatialX].data,
         expected_mosaic_x_coords,
     )
+
+
+def test_czi_reader_stitch_tiles_clamps_bbox_mismatch() -> None:
+    """
+    Test to ensure _stitch_tiles can handle a tile whose actual
+    Y/X size is smaller than the bounding box region.
+    """
+
+    # Fake tile data: shape (C, Y, X) = (1, 4, 5)
+    tile_data = np.arange(1 * 4 * 5, dtype=np.uint16).reshape((1, 4, 5))
+
+    data = tile_data
+    data_dims = "CYX"
+    data_dims_shape = {
+        "C": (0, 1),
+        dimensions.DimensionNames.SpatialY: (0, 4),
+        dimensions.DimensionNames.SpatialX: (0, 5),
+    }
+
+    class DummyTileInfo:
+        def __init__(self) -> None:
+            self.dimension_coordinates = {
+                "C": 0,
+                dimensions.DimensionNames.SpatialY: 0,
+                dimensions.DimensionNames.SpatialX: 0,
+            }
+
+    class DummyBBox:
+        def __init__(self, x: int, y: int, w: int, h: int) -> None:
+            self.x = x
+            self.y = y
+            self.w = w
+            self.h = h
+
+    tile_info = DummyTileInfo()
+
+    # Final mosaic is larger than tile: h=6, w=8
+    final_bbox = DummyBBox(x=0, y=0, w=8, h=6)
+    tile_bbox = DummyBBox(x=0, y=0, w=8, h=6)
+
+    stitched = AicsPyLibCziReader._stitch_tiles(
+        data=data,
+        data_dims=data_dims,
+        data_dims_shape=data_dims_shape,
+        tile_bboxes={tile_info: tile_bbox},
+        final_bbox=final_bbox,
+    )
+
+    # mosaic shape should follow final bbox (C, Y, X) = (1, 6, 8)
+    assert stitched.shape == (1, 6, 8)
+
+    # The overlapping region should match the original tile data
+    np.testing.assert_array_equal(stitched[:, 0:4, 0:5], tile_data)
