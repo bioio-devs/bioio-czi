@@ -233,3 +233,30 @@ def test_czi_reader_mosaic_coords(
         reader.mosaic_xarray_dask_data.coords[dimensions.DimensionNames.SpatialX].data,
         expected_x_coords,
     )
+
+
+def test_czi_reader_maps_bioio_scene_index_to_nonzero_czi_index() -> None:
+    """
+    Simulate a file where the only scene with data has a non-zero CZI scene
+    index, but BioIO exposes it as scene 0.
+    """
+
+    # Arrange
+    uri = LOCAL_RESOURCES_DIR / "S=2_4x2_T=2=Z=3_CH=2.czi"
+    reader = Reader(uri)._implementation
+
+    # Use the real scene bounding rectangles from the file, but collapse them
+    # so that only a single non-zero CZI index remains.
+    sbr = reader._scenes_bounding_rectangle
+    czi_indices = sorted(sbr.keys())
+    nonzero_czi_index = next(i for i in czi_indices if i != 0)
+
+    rect = sbr[nonzero_czi_index]
+    reader._scenes_bounding_rectangle = {nonzero_czi_index: rect}
+    reader._czi_scene_indices = [nonzero_czi_index]
+    reader._current_scene_index = 0  # BioIO scene index
+    reader._scenes = None  # force recompute with new mapping
+
+    # Act/Assert
+    data = reader.dask_data
+    assert data is not None
