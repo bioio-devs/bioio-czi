@@ -765,8 +765,39 @@ class Reader(BaseReader):
                 if dim is DimensionNames.Samples:
                     ans_indexes.append(slice(None))
 
-            # Assign the tiles into ans
-            ans[tuple(ans_indexes)] = data[tuple(data_indexes)]
+            # Fetch the tile data for this tile
+            tile = data[tuple(data_indexes)]
+
+            # --- Clamp mismatched bbox sizes ---
+
+            y_axis = ordered_dims_present.index(DimensionNames.SpatialY)
+            x_axis = ordered_dims_present.index(DimensionNames.SpatialX)
+
+            y_slice = ans_indexes[y_axis]
+            x_slice = ans_indexes[x_axis]
+
+            # Target bbox region
+            target_h = y_slice.stop - y_slice.start
+            target_w = x_slice.stop - x_slice.start
+
+            # Actual tile size
+            tile_h = tile.shape[-2]
+            tile_w = tile.shape[-1]
+
+            # If bounding box width/height exceeds actual tile size → clamp
+            if tile_h != target_h or tile_w != target_w:
+                new_h = min(tile_h, target_h)
+                new_w = min(tile_w, target_w)
+
+                # Shrink mosaic destination
+                ans_indexes[y_axis] = slice(y_slice.start, y_slice.start + new_h, 1)
+                ans_indexes[x_axis] = slice(x_slice.start, x_slice.start + new_w, 1)
+
+                # Shrink the tile data
+                tile = tile[..., :new_h, :new_w]
+
+            # Assign into mosaic
+            ans[tuple(ans_indexes)] = tile
 
         return ans
 
