@@ -260,3 +260,53 @@ def test_czi_reader_maps_bioio_scene_index_to_nonzero_czi_index() -> None:
     # Act/Assert
     data = reader.dask_data
     assert data is not None
+
+
+def test_scene_stack_consistency() -> None:
+    """
+    Regression test for multi-scene CZI stacking.
+
+    Ensures that per-scene `get_image_data()` is consistent with:
+      * get_stack
+      * get_dask_stack
+      * get_xarray_stack
+      * get_xarray_dask_stack
+    for all scenes in the file.
+    """
+
+    # Arrange
+    uri = LOCAL_RESOURCES_DIR / "w96_A1+A2.czi"
+    reader = Reader(uri)
+
+    # Ground Truth
+    per_scene = []
+    for scene in reader.scenes:
+        reader.set_scene(scene)
+        scene_data = reader.get_image_data()
+        per_scene.append(scene_data)
+
+    expected = np.stack(per_scene, axis=0)
+
+    # Reset scene
+    reader._reset_self()
+
+    # Act/ Assert
+    # ---- get_stack (numpy) ----
+    stack_np = reader.get_stack()
+    assert stack_np.shape == expected.shape
+    np.testing.assert_array_equal(stack_np, expected)
+
+    # ---- get_dask_stack ----
+    stack_da = reader.get_dask_stack()
+    assert stack_da.shape == expected.shape
+    np.testing.assert_array_equal(stack_da.compute(), expected)
+
+    # ---- get_xarray_stack ----
+    stack_xr = reader.get_xarray_stack()
+    assert stack_xr.shape == expected.shape
+    np.testing.assert_array_equal(stack_xr.data, expected)
+
+    # ---- get_xarray_dask_stack ----
+    stack_xr_da = reader.get_xarray_dask_stack()
+    assert stack_xr_da.shape == expected.shape
+    np.testing.assert_array_equal(stack_xr_da.data.compute(), expected)
