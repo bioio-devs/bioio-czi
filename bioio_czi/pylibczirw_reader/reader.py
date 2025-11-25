@@ -275,11 +275,8 @@ class Reader(BaseReader):
             # NOTE: self._current_scene_index is a BioIO scene index (0..N-1).
             # We must map it to the underlying CZI scene index before using it
             # with pylibczirw or _scenes_bounding_rectangle.
-            scene = current_scene
-            roi = current_roi
-
             with open(self._path) as file:
-                result = file.read(scene=scene, plane=plane, roi=roi)
+                result = file.read(scene=current_scene, plane=plane, roi=current_roi)
             # result.shape is (Y, X, 1) or (Y, X, 3) depending on whether it's RGB
             # or grayscale. We want to return (Y, X) or (Y, X, 3).
             return np.squeeze(result)
