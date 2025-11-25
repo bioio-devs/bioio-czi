@@ -107,6 +107,7 @@ class Reader(BaseReader):
                 self._scenes_bounding_rectangle = (
                     file.scenes_bounding_rectangle_no_pyramid
                 )
+                self._czi_scene_indices = sorted(self._scenes_bounding_rectangle.keys())
         except RuntimeError:
             raise exceptions.UnsupportedFileFormatError(self.__class__.__name__, path)
 
@@ -131,34 +132,39 @@ class Reader(BaseReader):
         >>> for i in range(len(image.scenes))
         """
 
-        def scene_name(metadata: ET.Element, scene_index: int) -> str:
+        def scene_name(metadata: ET.Element, czi_scene_index: int) -> str:
             scene_info = metadata.findall(
                 "./Metadata/Information/Image/Dimensions/"
-                f"S/Scenes/Scene[@Index='{scene_index}']"
+                f"S/Scenes/Scene[@Index='{czi_scene_index}']"
             )
             if len(scene_info) != 1:
                 raise UnsupportedMetadataError(
-                    f"Expected 1 scene for index '{scene_index}' "
-                    "but found {len(scene_info)}."
+                    f"Expected 1 scene for index '{czi_scene_index}' "
+                    f"but found {len(scene_info)}."
                 )
             scene_name = scene_info[0].get("Name")
             if scene_name is None:
-                scene_name = str(scene_index)
+                scene_name = str(czi_scene_index)
+
             shape_info = scene_info[0].find("Shape")
             if shape_info is not None:
                 shape_name = shape_info.get("Name")
                 if shape_name is not None:
                     return f"{scene_name}-{shape_name}"
+
             return scene_name
 
         if self._scenes is None:
-            with open(self._path) as file:
-                # Underlying scene IDs are ints
-                scene_ids = file.scenes_bounding_rectangle.keys()
-                self._scenes = tuple(scene_name(self.metadata, i) for i in scene_ids)
-                if len(self._scenes) < 1:
-                    # If there are no scenes, use the default scene ID
-                    self._scenes = (metadata.generate_ome_image_id(0),)
+            # Case 1: We have scenes with bounding rectangles (normal CZI)
+            if hasattr(self, "_czi_scene_indices") and len(self._czi_scene_indices) > 0:
+                self._scenes = tuple(
+                    scene_name(self.metadata, czi_index)
+                    for czi_index in self._czi_scene_indices
+                )
+
+            # Case 2: No scene info, fall back to a default scene
+            if not self._scenes:
+                self._scenes = (metadata.generate_ome_image_id(0),)
 
         return self._scenes
 
@@ -187,6 +193,27 @@ class Reader(BaseReader):
 
         return coords
 
+    def _get_czi_scene_index(self, scene_index: Optional[int] = None) -> int:
+        """
+        Map a BioIO scene index (0..N-1) to the underlying CZI scene index.
+
+        If no explicit scenes in the CZI (len(_scenes_bounding_rectangle) == 0),
+        we just return 0 and rely on pylibczirw's defaults (scene=None handlers).
+        """
+        if len(self._scenes_bounding_rectangle) == 0:
+            return 0
+
+        if scene_index is None:
+            scene_index = self._current_scene_index
+
+        if scene_index < 0 or scene_index >= len(self._czi_scene_indices):
+            raise IndexError(
+                f"BioIO scene index {scene_index} is out of range for "
+                f"{len(self._czi_scene_indices)} scenes."
+            )
+
+        return self._czi_scene_indices[scene_index]
+
     def _array_builder(self, index_dims: list[str]) -> Callable[[tuple[int]], int]:
         """
         Internal helper method to get one chunk of the image data.
@@ -210,40 +237,46 @@ class Reader(BaseReader):
         ... )
         """
 
+        # Freeze the scene / ROI for lazy builder invocation.
+        if len(self._scenes_bounding_rectangle) == 0:
+            # Some files have no scenes but can still be read if scene is not
+            # specified.
+            current_scene: int | None = None
+            current_roi = None
+        else:
+            czi_scene_index = self._get_czi_scene_index()
+            current_scene = czi_scene_index
+            current_roi = self._scenes_bounding_rectangle[czi_scene_index]
+
         def array_builder(indices: tuple[int]) -> int:
             assert len(indices) >= len(
                 index_dims
             ), f"Expected {len(indices)} >= {len(index_dims)}."
             # E.g., plane = {'T': 0, 'C': 1, 'Z': 2}
             plane = {d: indices[i] for i, d in enumerate(index_dims)}
-            scene: int | None
-            if len(self._scenes_bounding_rectangle) == 0:
-                # Some files have no scenes but can still be read if scene is not
-                # specified.
-                scene = None
-                roi = None
-            else:
-                # The purpose of the next 2 lines is complicated.
-                # ROI stands for Region Of Interest.
-                #
-                # In pylibczi's read method, the default ROI is the bounding
-                # rectangle of the scene **across all zoom levels**. We are going to
-                # read just the highest resolution level (zoom = 1), which is
-                # smaller than the default ROI in some cases. For example,
-                # scene 0 of the test file S=2_4x2_T=2=Z=3_CH=2.czi is 947x487 when
-                # looking at only the highest resolution, but is 948x488 when
-                # all zoom levels are considered. (I believe this is because at zoom
-                # 0.5, the result is ceiling(947/2) x ceiling(487/2).)
-                #
-                # See also: file.scenes_bounding_rectangle vs.
-                # file.scenes_bounding_rectangle_no_pyramid.
-                #
-                # Therefore, when calling read, we crop to just the ROI of the
-                # highest resolution level.
-                scene = self._current_scene_index
-                roi = self._scenes_bounding_rectangle[scene]
+            # The purpose of the next 2 lines is complicated.
+            # ROI stands for Region Of Interest.
+            #
+            # In pylibczi's read method, the default ROI is the bounding
+            # rectangle of the scene **across all zoom levels**. We are going to
+            # read just the highest resolution level (zoom = 1), which is
+            # smaller than the default ROI in some cases. For example,
+            # scene 0 of the test file S=2_4x2_T=2=Z=3_CH=2.czi is 947x487 when
+            # looking at only the highest resolution, but is 948x488 when
+            # all zoom levels are considered. (I believe this is because at zoom
+            # 0.5, the result is ceiling(947/2) x ceiling(487/2).)
+            #
+            # See also: file.scenes_bounding_rectangle vs.
+            # file.scenes_bounding_rectangle_no_pyramid.
+            #
+            # Therefore, when calling read, we crop to just the ROI of the
+            # highest resolution level.
+            #
+            # NOTE: self._current_scene_index is a BioIO scene index (0..N-1).
+            # We must map it to the underlying CZI scene index before using it
+            # with pylibczirw or _scenes_bounding_rectangle.
             with open(self._path) as file:
-                result = file.read(scene=scene, plane=plane, roi=roi)
+                result = file.read(scene=current_scene, plane=plane, roi=current_roi)
             # result.shape is (Y, X, 1) or (Y, X, 3) depending on whether it's RGB
             # or grayscale. We want to return (Y, X) or (Y, X, 3).
             return np.squeeze(result)
@@ -267,14 +300,21 @@ class Reader(BaseReader):
         # for each dimension. (Think of the coordinate array as the "ticks" on an axis.)
         dim_bounds = self._total_bounding_box
         if len(self._scenes_bounding_rectangle) > 0:
-            assert self._current_scene_index in self._scenes_bounding_rectangle, (
-                f"Expected {self._current_scene_index} to be in "
+            czi_scene_index = self._get_czi_scene_index()
+            assert czi_scene_index in self._scenes_bounding_rectangle, (
+                f"Expected CZI scene index {czi_scene_index} (from BioIO index "
+                f"{self._current_scene_index}) to be in "
                 f"{self._scenes_bounding_rectangle}."
             )
-            rect = self._scenes_bounding_rectangle[self._current_scene_index]
+            rect = self._scenes_bounding_rectangle[czi_scene_index]
             dim_bounds[DimensionNames.SpatialX] = (rect.x, rect.x + rect.w)
             dim_bounds[DimensionNames.SpatialY] = (rect.y, rect.y + rect.h)
-        coords = self._get_coords(self.metadata, self._current_scene_index, dim_bounds)
+
+        coords = self._get_coords(
+            self.metadata,
+            self._get_czi_scene_index(),
+            dim_bounds,
+        )
 
         # 2. Figure out which dimensions are available on this image, and put them in
         # TCZYX order as much as possible.
