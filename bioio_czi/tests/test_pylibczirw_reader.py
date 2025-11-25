@@ -233,3 +233,80 @@ def test_czi_reader_mosaic_coords(
         reader.mosaic_xarray_dask_data.coords[dimensions.DimensionNames.SpatialX].data,
         expected_x_coords,
     )
+
+
+def test_czi_reader_maps_bioio_scene_index_to_nonzero_czi_index() -> None:
+    """
+    Simulate a file where the only scene with data has a non-zero CZI scene
+    index, but BioIO exposes it as scene 0.
+    """
+
+    # Arrange
+    uri = LOCAL_RESOURCES_DIR / "S=2_4x2_T=2=Z=3_CH=2.czi"
+    reader = Reader(uri)._implementation
+
+    # Use the real scene bounding rectangles from the file, but collapse them
+    # so that only a single non-zero CZI index remains.
+    sbr = reader._scenes_bounding_rectangle
+    czi_indices = sorted(sbr.keys())
+    nonzero_czi_index = next(i for i in czi_indices if i != 0)
+
+    rect = sbr[nonzero_czi_index]
+    reader._scenes_bounding_rectangle = {nonzero_czi_index: rect}
+    reader._czi_scene_indices = [nonzero_czi_index]
+    reader._current_scene_index = 0  # BioIO scene index
+    reader._scenes = None  # force recompute with new mapping
+
+    # Act/Assert
+    data = reader.dask_data
+    assert data is not None
+
+
+def test_scene_stack_consistency() -> None:
+    """
+    Regression test for multi-scene CZI stacking.
+
+    Ensures that per-scene `get_image_data()` is consistent with:
+      * get_stack
+      * get_dask_stack
+      * get_xarray_stack
+      * get_xarray_dask_stack
+    for all scenes in the file.
+    """
+
+    # Arrange
+    uri = LOCAL_RESOURCES_DIR / "w96_A1+A2.czi"
+    reader = Reader(uri)
+
+    # Ground Truth
+    per_scene = []
+    for scene in reader.scenes:
+        reader.set_scene(scene)
+        scene_data = reader.get_image_data()
+        per_scene.append(scene_data)
+
+    expected = np.stack(per_scene, axis=0)
+
+    # Reset scene
+    reader._reset_self()
+
+    # Act/ Assert
+    # ---- get_stack (numpy) ----
+    stack_np = reader.get_stack()
+    assert stack_np.shape == expected.shape
+    np.testing.assert_array_equal(stack_np, expected)
+
+    # ---- get_dask_stack ----
+    stack_da = reader.get_dask_stack()
+    assert stack_da.shape == expected.shape
+    np.testing.assert_array_equal(stack_da.compute(), expected)
+
+    # ---- get_xarray_stack ----
+    stack_xr = reader.get_xarray_stack()
+    assert stack_xr.shape == expected.shape
+    np.testing.assert_array_equal(stack_xr.data, expected)
+
+    # ---- get_xarray_dask_stack ----
+    stack_xr_da = reader.get_xarray_dask_stack()
+    assert stack_xr_da.shape == expected.shape
+    np.testing.assert_array_equal(stack_xr_da.data.compute(), expected)
