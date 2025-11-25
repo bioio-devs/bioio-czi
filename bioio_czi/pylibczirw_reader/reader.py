@@ -237,46 +237,46 @@ class Reader(BaseReader):
         ... )
         """
 
+        # Freeze the scene / ROI for lazy builder invocation.
+        if len(self._scenes_bounding_rectangle) == 0:
+            # Some files have no scenes but can still be read if scene is not
+            # specified.
+            current_scene: int | None = None
+            current_roi = None
+        else:
+            czi_scene_index = self._get_czi_scene_index()
+            current_scene = czi_scene_index
+            current_roi = self._scenes_bounding_rectangle[czi_scene_index]
+
         def array_builder(indices: tuple[int]) -> int:
             assert len(indices) >= len(
                 index_dims
             ), f"Expected {len(indices)} >= {len(index_dims)}."
             # E.g., plane = {'T': 0, 'C': 1, 'Z': 2}
             plane = {d: indices[i] for i, d in enumerate(index_dims)}
-            scene: int | None
-            if len(self._scenes_bounding_rectangle) == 0:
-                # Some files have no scenes but can still be read if scene is not
-                # specified.
-                scene = None
-                roi = None
-            else:
-                # The purpose of the next 2 lines is complicated.
-                # ROI stands for Region Of Interest.
-                #
-                # In pylibczi's read method, the default ROI is the bounding
-                # rectangle of the scene **across all zoom levels**. We are going to
-                # read just the highest resolution level (zoom = 1), which is
-                # smaller than the default ROI in some cases. For example,
-                # scene 0 of the test file S=2_4x2_T=2=Z=3_CH=2.czi is 947x487 when
-                # looking at only the highest resolution, but is 948x488 when
-                # all zoom levels are considered. (I believe this is because at zoom
-                # 0.5, the result is ceiling(947/2) x ceiling(487/2).)
-                #
-                # See also: file.scenes_bounding_rectangle vs.
-                # file.scenes_bounding_rectangle_no_pyramid.
-                #
-                # Therefore, when calling read, we crop to just the ROI of the
-                # highest resolution level.
-                #
-                # NOTE: self._current_scene_index is a BioIO scene index (0..N-1).
-                # We must map it to the underlying CZI scene index before using it
-                # with pylibczirw or _scenes_bounding_rectangle.
-                czi_scene_index = self._get_czi_scene_index()
-                scene = czi_scene_index
-                roi = self._scenes_bounding_rectangle[czi_scene_index]
-
+            # The purpose of the next 2 lines is complicated.
+            # ROI stands for Region Of Interest.
+            #
+            # In pylibczi's read method, the default ROI is the bounding
+            # rectangle of the scene **across all zoom levels**. We are going to
+            # read just the highest resolution level (zoom = 1), which is
+            # smaller than the default ROI in some cases. For example,
+            # scene 0 of the test file S=2_4x2_T=2=Z=3_CH=2.czi is 947x487 when
+            # looking at only the highest resolution, but is 948x488 when
+            # all zoom levels are considered. (I believe this is because at zoom
+            # 0.5, the result is ceiling(947/2) x ceiling(487/2).)
+            #
+            # See also: file.scenes_bounding_rectangle vs.
+            # file.scenes_bounding_rectangle_no_pyramid.
+            #
+            # Therefore, when calling read, we crop to just the ROI of the
+            # highest resolution level.
+            #
+            # NOTE: self._current_scene_index is a BioIO scene index (0..N-1).
+            # We must map it to the underlying CZI scene index before using it
+            # with pylibczirw or _scenes_bounding_rectangle.
             with open(self._path) as file:
-                result = file.read(scene=scene, plane=plane, roi=roi)
+                result = file.read(scene=current_scene, plane=plane, roi=current_roi)
             # result.shape is (Y, X, 1) or (Y, X, 3) depending on whether it's RGB
             # or grayscale. We want to return (Y, X) or (Y, X, 3).
             return np.squeeze(result)
