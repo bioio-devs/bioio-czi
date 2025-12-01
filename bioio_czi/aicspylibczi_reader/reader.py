@@ -697,18 +697,36 @@ class Reader(BaseReader):
         tile_bboxes: Dict[TileInfo, BBox],
         final_bbox: BBox,
     ) -> types.ArrayLike:
-        # Assumptions: 1) docs for ZEISSRAW(CZI) say:
-        #   Scene – for clustering items in X/Y direction (data belonging to
-        #   contiguous regions of interests in a mosaic image).
+        """
+        Stitches all mosaic tiles for a single CZI scene into a full-resolution array.
 
-        # Store the mosaic array shape
-        arr_shape_list = []
+        High-level process:
+        -------------------
+        1. Preallocate the full mosaic array sized to `final_bbox` (the union of *all*
+        tile bounding boxes). → This array is initially filled with zeros.
+
+        2. For each tile:
+        - Determine source slice.
+        - Determine destination slice (where this tile belongs in the full mosaic).
+        - If the metadata bbox exceeds the true tile pixel shape, clamp both slices.
+        - Copy only the overlapping region from the tile into the mosaic.
+
+        Important detail:
+        -----------------
+        The mosaic allocation is NEVER resized or shrunk. Only per-tile slices are
+        clamped. Any unfilled area in the mosaic remains zero.
+        """
 
         ordered_dims_present = [
             dim
             for dim in data_dims
             if dim not in [CZI_BLOCK_DIM_CHAR, DimensionNames.MosaicTile]
         ]
+
+        # Build the global output shape according to the dim order.
+        # For non-spatial dims we copy their sizes directly.
+        # For Y/X dims we use final_bbox.h/w (the full combined mosaic extent).
+        arr_shape_list = []
         for dim in ordered_dims_present:
             if dim not in REQUIRED_CHUNK_DIMS:
                 arr_shape_list.append(data_dims_shape[dim][1])
@@ -719,34 +737,38 @@ class Reader(BaseReader):
             if dim is DimensionNames.Samples:
                 arr_shape_list.append(data_dims_shape[CZI_SAMPLES_DIM_CHAR][1])
 
-        ans = None
+        # Initialize the output mosaic (zero-filled).
+        # All tiles will be written into slices of this array.
         if isinstance(data, da.Array):
-            ans = da.zeros(
-                shape=tuple(arr_shape_list),
-                dtype=data.dtype,
-            )
+            ans = da.zeros(shape=tuple(arr_shape_list), dtype=data.dtype)
         else:
             ans = np.zeros(arr_shape_list, dtype=data.dtype)
 
+        # Process each tile and copy it into its appropriate mosaic slice
         for tile_info, box in tile_bboxes.items():
-            # Construct data indexes to use
+
+            # Build the index tuple for selecting this tile from the input data array.
             tile_dims = tile_info.dimension_coordinates
             tile_dims.pop(CZI_SCENE_DIM_CHAR, None)
             tile_dims.pop(CZI_BLOCK_DIM_CHAR, None)
+
             data_indexes = [
                 tile_dims[t_dim]
                 for t_dim in data_dims
                 if t_dim not in REQUIRED_CHUNK_DIMS
             ]
-            # Add Y and X
-            data_indexes.append(slice(None))  # Y ":"
-            data_indexes.append(slice(None))  # X ":"
+
+            # Add fully-open slices for Y and X from the tile
+            data_indexes.append(slice(None))  # Y
+            data_indexes.append(slice(None))  # X
             if CZI_SAMPLES_DIM_CHAR in tile_dims.keys():
                 data_indexes.append(slice(None))
 
-            # Construct data indexes for ans
+            # Build the destination slice into the mosaic (`ans_indexes`)
             ans_indexes = []
             for dim in ordered_dims_present:
+
+                # Non-spatial dims: forward the tile's coordinate
                 if dim not in [
                     DimensionNames.MosaicTile,
                     DimensionNames.Samples,
@@ -756,17 +778,49 @@ class Reader(BaseReader):
                     if dim in tile_dims.keys():
                         ans_indexes.append(tile_dims[dim])
 
+                # Spatial Y/X dims: compute slice relative to mosaic origin
                 if dim is DimensionNames.SpatialY:
                     start = box.y - final_bbox.y
                     ans_indexes.append(slice(start, start + box.h, 1))
+
                 if dim is DimensionNames.SpatialX:
                     start = box.x - final_bbox.x
                     ans_indexes.append(slice(start, start + box.w, 1))
+
                 if dim is DimensionNames.Samples:
                     ans_indexes.append(slice(None))
 
-            # Assign the tiles into ans
-            ans[tuple(ans_indexes)] = data[tuple(data_indexes)]
+            # Extract the tile’s pixel data
+            tile = data[tuple(data_indexes)]
+
+            # Handle mismatches where bbox > actual tile shape
+            y_axis = ordered_dims_present.index(DimensionNames.SpatialY)
+            x_axis = ordered_dims_present.index(DimensionNames.SpatialX)
+
+            y_slice = ans_indexes[y_axis]
+            x_slice = ans_indexes[x_axis]
+
+            target_h = y_slice.stop - y_slice.start
+            target_w = x_slice.stop - x_slice.start
+
+            tile_h = tile.shape[-2]
+            tile_w = tile.shape[-1]
+
+            # If mismatch, clamp BOTH the destination slice and the tile data slice.
+            # The global mosaic size remains unchanged.
+            if tile_h != target_h or tile_w != target_w:
+                new_h = min(tile_h, target_h)
+                new_w = min(tile_w, target_w)
+
+                # Clamp destination area
+                ans_indexes[y_axis] = slice(y_slice.start, y_slice.start + new_h, 1)
+                ans_indexes[x_axis] = slice(x_slice.start, x_slice.start + new_w, 1)
+
+                # Clamp tile data
+                tile = tile[..., :new_h, :new_w]
+
+            # Copy tile pixels into the mosaic
+            ans[tuple(ans_indexes)] = tile
 
         return ans
 
