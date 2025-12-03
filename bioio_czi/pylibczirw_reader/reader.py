@@ -53,6 +53,8 @@ class Reader(BaseReader):
         Default: {}
     """
 
+    NAME = "bioio-czi-pylibczirw"
+
     _xarray_dask_data: Optional["xr.DataArray"] = None
     _xarray_data: Optional["xr.DataArray"] = None
     _dims: Optional[Dimensions] = None

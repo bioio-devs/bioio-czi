@@ -27,9 +27,7 @@ class Reader(BaseReader):
     for volumetric Zeiss CZI images.
     """
 
-    # Note: Any public method overridden by PylibCziReader or AicsPyLibCziReader must
-    # explicitly be defined here, using self._implementation
-    _implementation: PylibCziReader | AicsPyLibCziReader
+    _implementation: BaseReader
 
     # Although _fs is named with an underscore, it is used by tests, so must be exposed
     # from the implementation.
@@ -165,6 +163,21 @@ class Reader(BaseReader):
         # set_scene must be delegated to the implementation because that's where the
         # scene ID is stored.
         self._implementation.set_scene(scene_id)
+
+    @property
+    def name(self) -> str:
+        """
+        Returns
+        -------
+        name : str
+            Human-readable identifier for this Reader instance.
+
+            Delegates to the active backend implementation, e.g.:
+
+            * "bioio-czi-pylibczirw"
+            * "bioio-czi-aicspylibczi"
+        """
+        return self._implementation.name
 
     @property
     def current_scene(self) -> str:

@@ -64,6 +64,8 @@ class Reader(BaseReader):
     To use this reader, install with: `pip install aicspylibczi>=3.1.1`.
     """
 
+    NAME = "bioio-czi-aicspylibczi"
+
     _xarray_dask_data: Optional["xr.DataArray"] = None
     _xarray_data: Optional["xr.DataArray"] = None
     _mosaic_xarray_dask_data: Optional["xr.DataArray"] = None
@@ -254,6 +256,20 @@ class Reader(BaseReader):
                 self._scenes = tuple(scene_names)
 
         return self._scenes
+
+    def name(self) -> str:
+        """
+        Returns
+        -------
+        name : str
+            Human-readable identifier for this Reader instance.
+
+            Delegates to the active backend implementation, e.g.:
+
+            * "bioio-czi-pylibczirw"
+            * "bioio-czi-aicspylibczi"
+        """
+        return self._implementation.name
 
     @staticmethod
     def _dims_shape_to_scene_dims_shape(
