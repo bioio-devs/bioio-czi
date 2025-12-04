@@ -27,6 +27,8 @@ class Reader(BaseReader):
     for volumetric Zeiss CZI images.
     """
 
+    # Note: Any public method overridden by PylibCziReader or AicsPyLibCziReader must
+    # explicitly be defined here, using self._implementation
     _implementation: BaseReader
 
     # Although _fs is named with an underscore, it is used by tests, so must be exposed
