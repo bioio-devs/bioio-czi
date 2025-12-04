@@ -64,6 +64,8 @@ class Reader(BaseReader):
     To use this reader, install with: `pip install aicspylibczi>=3.1.1`.
     """
 
+    NAME = "bioio-czi-aicspylibczi"
+
     _xarray_dask_data: Optional["xr.DataArray"] = None
     _xarray_data: Optional["xr.DataArray"] = None
     _mosaic_xarray_dask_data: Optional["xr.DataArray"] = None
