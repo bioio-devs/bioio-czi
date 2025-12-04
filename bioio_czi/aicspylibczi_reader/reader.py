@@ -257,20 +257,6 @@ class Reader(BaseReader):
 
         return self._scenes
 
-    def name(self) -> str:
-        """
-        Returns
-        -------
-        name : str
-            Human-readable identifier for this Reader instance.
-
-            Delegates to the active backend implementation, e.g.:
-
-            * "bioio-czi-pylibczirw"
-            * "bioio-czi-aicspylibczi"
-        """
-        return self._implementation.name
-
     @staticmethod
     def _dims_shape_to_scene_dims_shape(
         dims_shape: List[Dict], scene_index: int, consistent: bool
