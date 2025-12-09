@@ -167,6 +167,21 @@ class Reader(BaseReader):
         self._implementation.set_scene(scene_id)
 
     @property
+    def name(self) -> str:
+        """
+        Returns
+        -------
+        name : str
+            Human-readable identifier for this Reader instance.
+
+            Delegates to the active backend implementation, e.g.:
+
+            * "bioio-czi-pylibczirw"
+            * "bioio-czi-aicspylibczi"
+        """
+        return self._implementation.name
+
+    @property
     def current_scene(self) -> str:
         return self._implementation.current_scene
 
