@@ -78,3 +78,63 @@ def time_between_subblocks(
     # Difference in milliseconds is delta divided by 1 millisecond
     # Explicit conversion to float is required, lest we get a numpy float64
     return float(delta / np.timedelta64(1, "ms"))
+
+
+def frame_acquisition_times(
+    czi: CziFile, current_scene: int, mosaic_tiles: int, timepoints: int
+) -> Optional[list[list[Optional[np.datetime64]]]]:
+    """
+    Returns the earliest acquisition time for each mosaic tile at each timepoint.
+
+    Parameters
+    ----------
+    czi: CziFile
+        Open CziFile instance.
+    current_scene: int
+        Scene index to inspect.
+    mosaic_tiles: int
+        Number of mosaic tiles (M dimension) for the scene.
+    timepoints: int
+        Number of timepoints (T dimension) for the scene. Defaults to 1 when the
+        T dimension is absent.
+
+    Returns
+    -------
+    Optional[list[list[Optional[np.datetime64]]]]:
+        A nested list where the outer index is the mosaic tile and the inner index
+        is the timepoint. Each element is the earliest acquisition time observed
+        for that tile and timepoint, or None if it could not be determined.
+    """
+    # Pre-fill output with None so callers can distinguish missing values.
+    times: list[list[Optional[np.datetime64]]] = [
+        [None for _ in range(timepoints)] for _ in range(mosaic_tiles)
+    ]
+
+    try:
+        for subblock_info, subblock_metadata in czi.read_subblock_metadata(
+            S=current_scene
+        ):
+            mosaic_index = subblock_info.get("M", 0)
+            time_index = subblock_info.get("T", 0)
+            if mosaic_index >= mosaic_tiles or time_index >= timepoints:
+                continue
+
+            acquisition_time = _extract_acquisition_time_from_subblock_metadata(
+                subblock_metadata
+            )
+            if acquisition_time is None:
+                continue
+
+            existing_time = times[mosaic_index][time_index]
+            if existing_time is None or acquisition_time < existing_time:
+                times[mosaic_index][time_index] = acquisition_time
+
+    except Exception as exc:
+        log.warning("Failed to extract frame acquisition times: %s", exc, exc_info=True)
+        return None
+
+    # If all entries are None, return None to indicate extraction failure.
+    has_values = any(
+        acquisition_time is not None for row in times for acquisition_time in row
+    )
+    return times if has_values else None

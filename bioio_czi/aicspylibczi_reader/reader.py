@@ -28,7 +28,7 @@ from .. import metadata as metadata_utils
 from ..bounding_box import size
 from ..channels import get_channel_names
 from ..pixel_sizes import get_physical_pixel_sizes
-from .subblock_metadata import time_between_subblocks
+from .subblock_metadata import frame_acquisition_times, time_between_subblocks
 
 ###############################################################################
 
@@ -1019,6 +1019,34 @@ class Reader(BaseReader):
                 m_indexes_to_mosaic_positions[m_index]
                 for m_index in sorted(m_indexes_to_mosaic_positions.keys())
             ]
+
+    @property
+    def frame_acquisition_times(self) -> Optional[list[list[Optional[np.datetime64]]]]:
+        """
+        Return the earliest acquisition time for each mosaic tile and timepoint.
+
+        Returns
+        -------
+        Optional[list[list[Optional[np.datetime64]]]]:
+            A nested list where each outer index corresponds to a mosaic tile and
+            each inner index corresponds to a timepoint. Values are np.datetime64
+            objects or None when extraction fails.
+        """
+        mosaic_tiles = getattr(self.dims, DimensionNames.MosaicTile, None)
+        # Mosaic dimension is required to report per-tile acquisition times.
+        if mosaic_tiles is None or mosaic_tiles < 1:
+            return None
+
+        timepoints = getattr(self.dims, DimensionNames.Time, None) or 1
+
+        with self._fs.open(self._path) as open_resource:
+            czi = CziFile(open_resource.f)
+            return frame_acquisition_times(
+                czi=czi,
+                current_scene=self.current_scene_index,
+                mosaic_tiles=mosaic_tiles,
+                timepoints=timepoints,
+            )
 
     @property
     def time_interval(self) -> Optional[timedelta]:
