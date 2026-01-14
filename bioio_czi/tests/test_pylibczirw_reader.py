@@ -310,3 +310,10 @@ def test_scene_stack_consistency() -> None:
     stack_xr_da = reader.get_xarray_dask_stack()
     assert stack_xr_da.shape == expected.shape
     np.testing.assert_array_equal(stack_xr_da.data.compute(), expected)
+
+
+def test_frame_acquisition_times_unavailable_in_pylibczirw() -> None:
+    uri = LOCAL_RESOURCES_DIR / "S=2_4x2_T=2=Z=3_CH=2.czi"
+    reader = Reader(uri)
+
+    assert reader.frame_acquisition_times is None
