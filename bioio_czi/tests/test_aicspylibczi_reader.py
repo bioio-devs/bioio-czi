@@ -1,8 +1,9 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+import json
 import xml.etree.ElementTree as ET
-from typing import List, Tuple
+from typing import Any, List, Tuple
 
 import numpy as np
 import pytest
@@ -222,22 +223,73 @@ def test_czi_reader_remote_xfail() -> None:
     Reader(uri, use_aicspylibczi=True)
 
 
-def test_frame_acquisition_times_all_mosaic_positions() -> None:
-    uri = LOCAL_RESOURCES_DIR / "S=2_4x2_T=2=Z=3_CH=2.czi"
+@pytest.mark.parametrize(
+    "filename, " "set_scene, ",
+    [
+        (
+            "S=2_4x2_T=2=Z=3_CH=2.czi",
+            "TR1",
+        ),
+        (
+            "s_1_t_1_c_1_z_1.czi",
+            "Image:0",
+        ),
+        (
+            "s_3_t_1_c_3_z_5.czi",
+            "P2",
+        ),
+        (
+            "s_3_t_1_c_3_z_5.czi",
+            "P3",
+        ),
+        (
+            "s_3_t_1_c_3_z_5.czi",
+            "P1",
+        ),
+        (
+            "RGB-8bit.czi",
+            "Image:0",
+        ),
+        (
+            "variable_per_scene_dims.czi",
+            "P2-D4",
+        ),
+    ],
+)
+def test_frame_acquisition_times_all_mosaic_positions(
+    filename: str, set_scene: str
+) -> None:
+    uri = LOCAL_RESOURCES_DIR / filename
     reader = Reader(uri, use_aicspylibczi=True)
+    reader.set_scene(set_scene)
 
     acquisition_times = reader.frame_acquisition_times
 
     assert acquisition_times is not None
 
+    expected_path = LOCAL_RESOURCES_DIR / "frame_acquisition_times_expected.json"
+    with expected_path.open() as f:
+        expected_acquisition_times = json.load(f)
 
-#    assert len(acquisition_times) == 8
-#    assert all(len(times) == 2 for times in acquisition_times)
-#
-#
-#
-#    np.testing.assert_array_equal(np.array(acquisition_times),
-# np.array(expected_times))
+    expected_for_case = expected_acquisition_times.get(filename, {}).get(set_scene)
+    assert expected_for_case is not None
+
+    def normalize(entries: List[dict[str, int | str]]) -> List[dict[str, int | str]]:
+        def normalize_entry(entry: dict[str, Any]) -> dict[str, int | str]:
+            normalized: dict[str, int | str] = {}
+            for key, value in entry.items():
+                if key == "acquisition_time":
+                    normalized[key] = str(value)
+                else:
+                    normalized[key] = int(value)
+            return normalized
+
+        return sorted(
+            (normalize_entry(entry) for entry in entries),
+            key=lambda entry: tuple(sorted(entry.items())),
+        )
+
+    assert normalize(acquisition_times) == normalize(expected_for_case)
 
 
 # @pytest.mark.parametrize(
