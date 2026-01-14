@@ -1021,31 +1021,23 @@ class Reader(BaseReader):
             ]
 
     @property
-    def frame_acquisition_times(self) -> Optional[list[list[Optional[np.datetime64]]]]:
+    def frame_acquisition_times(self) -> Optional[list[dict[str, int | np.datetime64]]]:
         """
         Return the earliest acquisition time for each mosaic tile and timepoint.
 
         Returns
         -------
-        Optional[list[list[Optional[np.datetime64]]]]:
-            A nested list where each outer index corresponds to a mosaic tile and
-            each inner index corresponds to a timepoint. Values are np.datetime64
-            objects or None when extraction fails.
+        Optional[list[dict[str, int | np.datetime64]]]:
+            A list of dictionaries, each containing subblock info and the corresponding
+            acquisition time under the key "acquisition_time".
+            Returns None if extraction fails.
         """
-        mosaic_tiles = getattr(self.dims, DimensionNames.MosaicTile, None)
-        # Mosaic dimension is required to report per-tile acquisition times.
-        if mosaic_tiles is None or mosaic_tiles < 1:
-            return None
-
-        timepoints = getattr(self.dims, DimensionNames.Time, None) or 1
 
         with self._fs.open(self._path) as open_resource:
             czi = CziFile(open_resource.f)
             return frame_acquisition_times(
                 czi=czi,
                 current_scene=self.current_scene_index,
-                mosaic_tiles=mosaic_tiles,
-                timepoints=timepoints,
             )
 
     @property
