@@ -80,7 +80,7 @@ def time_between_subblocks(
     return float(delta / np.timedelta64(1, "ms"))
 
 
-def frame_acquisition_times(
+def acquisition_times(
     czi: CziFile, current_scene: int
 ) -> Optional[list[dict[str, int | np.datetime64]]]:
     """

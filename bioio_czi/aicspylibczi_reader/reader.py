@@ -28,7 +28,7 @@ from .. import metadata as metadata_utils
 from ..bounding_box import size
 from ..channels import get_channel_names
 from ..pixel_sizes import get_physical_pixel_sizes
-from .subblock_metadata import frame_acquisition_times, time_between_subblocks
+from .subblock_metadata import acquisition_times, time_between_subblocks
 
 ###############################################################################
 
@@ -1021,7 +1021,7 @@ class Reader(BaseReader):
             ]
 
     @property
-    def frame_acquisition_times(self) -> Optional[list[dict[str, int | np.datetime64]]]:
+    def acquisition_times(self) -> Optional[list[dict[str, int | np.datetime64]]]:
         """
         Return the earliest acquisition time for each mosaic tile and timepoint.
 
@@ -1035,7 +1035,7 @@ class Reader(BaseReader):
 
         with self._fs.open(self._path) as open_resource:
             czi = CziFile(open_resource.f)
-            return frame_acquisition_times(
+            return acquisition_times(
                 czi=czi,
                 current_scene=self.current_scene_index,
             )
