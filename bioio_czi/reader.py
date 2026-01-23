@@ -408,7 +408,7 @@ class Reader(BaseReader):
         return self._implementation.get_mosaic_tile_positions(**kwargs)
 
     @property
-    def frame_acquisition_times(self) -> Any:
+    def acquisition_times(self) -> Any:
         """
         Return per-mosaic acquisition times when available.
 
@@ -418,7 +418,7 @@ class Reader(BaseReader):
             A nested list of acquisition times indexed by mosaic tile and timepoint
             when supported by the underlying implementation; otherwise, None.
         """
-        return getattr(self._implementation, "frame_acquisition_times", None)
+        return getattr(self._implementation, "acquisition_times", None)
 
     @property
     def time_interval(self) -> TimeInterval:

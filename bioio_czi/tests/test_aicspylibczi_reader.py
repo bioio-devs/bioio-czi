@@ -503,7 +503,7 @@ def test_frame_acquisition_times_match_expected_values(
     reader = Reader(uri, use_aicspylibczi=True)
     reader.set_scene(set_scene)
 
-    acquisition_times = reader.frame_acquisition_times
+    acquisition_times = reader.acquisition_times
 
     if expected_acquisition_times is None:
         assert not acquisition_times
@@ -523,7 +523,7 @@ def test_frame_acquisition_times_change_with_scene_selection() -> None:
     acquisition_times_by_scene = {}
     for scene in ("P2", "P3", "P1"):
         reader.set_scene(scene)
-        acquisition_times = reader.frame_acquisition_times
+        acquisition_times = reader.acquisition_times
         assert acquisition_times is not None
         normalized = _normalize_entries(acquisition_times)
         acquisition_times_by_scene[scene] = tuple(
