@@ -100,7 +100,6 @@ def acquisition_times(
         acquisition time under the key "acquisition_time".
         Returns None if extraction fails.
     """
-    # Pre-fill output with None so callers can distinguish missing values.
 
     try:
         acquisition_times: list[dict] = []
