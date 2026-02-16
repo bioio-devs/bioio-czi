@@ -1,7 +1,7 @@
 import logging
 import xml.etree.ElementTree as ET
 from copy import copy
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Hashable, List, Optional, Tuple, Union
 
@@ -1021,13 +1021,13 @@ class Reader(BaseReader):
             ]
 
     @property
-    def acquisition_times(self) -> Optional[list[dict[str, int | np.datetime64]]]:
+    def acquisition_times(self) -> Optional[list[dict[str, int | datetime]]]:
         """
         Return the earliest acquisition time for each mosaic tile and timepoint.
 
         Returns
         -------
-        Optional[list[dict[str, int | np.datetime64]]]:
+        Optional[list[dict[str, int | datetime]]]:
             A list of dictionaries, each containing subblock info and the corresponding
             acquisition time under the key "acquisition_time".
             Returns None if extraction fails.

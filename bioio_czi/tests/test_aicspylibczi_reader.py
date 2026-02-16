@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+import datetime
 import xml.etree.ElementTree as ET
 from typing import Any, List, Tuple
 
@@ -8,6 +9,7 @@ import numpy as np
 import pytest
 from _aicspylibczi import PylibCZI_CDimCoordinatesOverspecifiedException
 from bioio_base import dimensions, exceptions, test_utilities
+from dateutil import parser
 
 from bioio_czi import Reader
 from bioio_czi.aicspylibczi_reader.reader import Reader as AicsPyLibCziReader
@@ -227,10 +229,21 @@ def _normalize_entries(entries: List[dict[str, Any]]) -> List[dict[str, int | st
     Normalize list entries for stable comparison irrespective of ordering or types.
     """
 
+    def normalize_acquisition_time(value: Any) -> str:
+        acquisition_time = value
+        if isinstance(value, str):
+            acquisition_time = parser.isoparse(value)
+        if acquisition_time.tzinfo is None:
+            acquisition_time = acquisition_time.replace(tzinfo=datetime.timezone.utc)
+        return acquisition_time.isoformat(timespec="microseconds")
+
     def normalize_entry(entry: dict[str, Any]) -> dict[str, int | str]:
         normalized: dict[str, int | str] = {}
         for key, value in entry.items():
-            normalized[key] = str(value) if key == "acquisition_time" else int(value)
+            if key == "acquisition_time":
+                normalized[key] = normalize_acquisition_time(value)
+            else:
+                normalized[key] = int(value)
         return normalized
 
     return sorted(
@@ -510,6 +523,11 @@ def test_frame_acquisition_times_match_expected_values(
         return
 
     assert acquisition_times is not None
+    assert all(
+        isinstance(entry["acquisition_time"], datetime.datetime)
+        and entry["acquisition_time"].tzinfo is not None
+        for entry in acquisition_times
+    )
 
     assert _normalize_entries(acquisition_times) == _normalize_entries(
         expected_acquisition_times

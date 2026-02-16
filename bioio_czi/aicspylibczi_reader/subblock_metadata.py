@@ -3,11 +3,11 @@ Helper functions extracting metadata from subblocks in aicspylibczi mode.
 """
 
 import logging
-import warnings
+from datetime import datetime, timezone
 from typing import Optional
 
-import numpy as np
 from aicspylibczi import CziFile
+from dateutil import parser
 from lxml import etree
 
 log = logging.getLogger(__name__)
@@ -15,30 +15,26 @@ log = logging.getLogger(__name__)
 
 def _extract_acquisition_time_from_subblock_metadata(
     subblock_metadata: str,
-) -> Optional[np.datetime64]:
+) -> Optional[datetime]:
     """Extracts acquisition time from subblock metadata."""
     outlxml = etree.fromstring(subblock_metadata)
     acquisition_time_element = outlxml.find(".//AcquisitionTime")
 
     if acquisition_time_element is not None and acquisition_time_element.text:
         try:
-            # Parse acquisition time using numpy's datetime64 because it supports high
-            # precision time (sub-microsecond). This parsing treats timezone-less dates
-            # as UTC, which is fine for computing durations.
-            with warnings.catch_warnings():
-                warnings.filterwarnings(
-                    "ignore",
-                    "no explicit representation of timezones available",
-                    category=UserWarning,
-                )
-                return np.datetime64(str(acquisition_time_element.text))
+            acquisition_time = parser.isoparse(str(acquisition_time_element.text))
+            # Keep acquisition timestamps timezone-aware. If timezone is missing in the
+            # source metadata, default to UTC for consistent comparisons.
+            if acquisition_time.tzinfo is None:
+                acquisition_time = acquisition_time.replace(tzinfo=timezone.utc)
+            return acquisition_time
         except Exception as exc:
             log.warning("Failed to extract acquisition time: %s", exc, exc_info=True)
 
     return None
 
 
-def _acquisition_time(czi: CziFile, scene: int, frame: int) -> Optional[np.datetime64]:
+def _acquisition_time(czi: CziFile, scene: int, frame: int) -> Optional[datetime]:
     """Get the time of the first acquisition in the given scene at the given frame."""
     subblocks_at_t: list[tuple[dict, str]] = czi.read_subblock_metadata(
         T=frame, S=scene
@@ -50,17 +46,14 @@ def _acquisition_time(czi: CziFile, scene: int, frame: int) -> Optional[np.datet
         _extract_acquisition_time_from_subblock_metadata(metadata)
         for _, metadata in subblocks_at_t
     ]
-    # NaT is numpy's representation of "Not a Time", which is used when parsing fails.
-    filtered_acquisition_times = [
-        t for t in acquisition_times if t is not None and t is not np.datetime64("NaT")
-    ]
+    filtered_acquisition_times = [t for t in acquisition_times if t is not None]
 
     if len(filtered_acquisition_times) == 0:
         return None
     # One timepoint has many acquisitions (e.g., different channels, different Z
     # positions): the "acquisition time" of the timepoint is the start of the first
     # acquisition.
-    return np.min(filtered_acquisition_times)
+    return min(filtered_acquisition_times)
 
 
 def time_between_subblocks(
@@ -75,14 +68,12 @@ def time_between_subblocks(
     if start_time is None or end_time is None:
         return None
     delta = end_time - start_time
-    # Difference in milliseconds is delta divided by 1 millisecond
-    # Explicit conversion to float is required, lest we get a numpy float64
-    return float(delta / np.timedelta64(1, "ms"))
+    return delta.total_seconds() * 1000.0
 
 
 def acquisition_times(
     czi: CziFile, current_scene: int
-) -> Optional[list[dict[str, int | np.datetime64]]]:
+) -> Optional[list[dict[str, int | datetime]]]:
     """
     Returns the earliest acquisition time for each mosaic tile at each timepoint.
 
@@ -95,14 +86,14 @@ def acquisition_times(
 
     Returns
     -------
-    Optional[list[dict[str, int | np.datetime64]]]:
+    Optional[list[dict[str, int | datetime]]]:
         A list of dictionaries, each containing subblock info and the corresponding
         acquisition time under the key "acquisition_time".
         Returns None if extraction fails.
     """
 
     try:
-        acquisition_times: list[dict] = []
+        acquisition_times: list[dict[str, int | datetime]] = []
 
         for subblock_info, subblock_metadata in czi.read_subblock_metadata(
             S=current_scene

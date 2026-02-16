@@ -1,11 +1,11 @@
 # Support use of type Reader inside definition of Reader
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import Any, List, Optional, Tuple, Union
 from xml.etree import ElementTree
 
-import numpy as np
 import xarray as xr
 from bioio_base.dimensions import Dimensions
 from bioio_base.exceptions import UnsupportedFileFormatError
@@ -409,13 +409,13 @@ class Reader(BaseReader):
         return self._implementation.get_mosaic_tile_positions(**kwargs)
 
     @property
-    def acquisition_times(self) -> Optional[list[dict[str, int | np.datetime64]]]:
+    def acquisition_times(self) -> Optional[list[dict[str, int | datetime]]]:
         """
         Return per-mosaic acquisition times when available.
 
         Returns
         -------
-        Optional[list[dict[str, int | np.datetime64]]]
+        Optional[list[dict[str, int | datetime]]]
             A list of dictionaries, each containing indices such as
             `{"C":1, "Z":10}` and the corresponding acquisition time
             under the key "acquisition_time"
