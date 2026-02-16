@@ -1,13 +1,15 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+import datetime
 import xml.etree.ElementTree as ET
-from typing import List, Tuple
+from typing import Any, List, Tuple
 
 import numpy as np
 import pytest
 from _aicspylibczi import PylibCZI_CDimCoordinatesOverspecifiedException
 from bioio_base import dimensions, exceptions, test_utilities
+from dateutil import parser
 
 from bioio_czi import Reader
 from bioio_czi.aicspylibczi_reader.reader import Reader as AicsPyLibCziReader
@@ -220,6 +222,334 @@ def test_czi_reader_remote_xfail() -> None:
         "stitchedwelloverviewimagepath/05080558_3500003720_10X_20191220_D3.czi"
     )
     Reader(uri, use_aicspylibczi=True)
+
+
+def _normalize_entries(entries: List[dict[str, Any]]) -> List[dict[str, int | str]]:
+    """
+    Normalize list entries for stable comparison irrespective of ordering or types.
+    """
+
+    def normalize_acquisition_time(value: Any) -> str:
+        acquisition_time = value
+        if isinstance(value, str):
+            acquisition_time = parser.isoparse(value)
+        if acquisition_time.tzinfo is None:
+            acquisition_time = acquisition_time.replace(tzinfo=datetime.timezone.utc)
+        return acquisition_time.isoformat(timespec="microseconds")
+
+    def normalize_entry(entry: dict[str, Any]) -> dict[str, int | str]:
+        normalized: dict[str, int | str] = {}
+        for key, value in entry.items():
+            if key == "acquisition_time":
+                normalized[key] = normalize_acquisition_time(value)
+            else:
+                normalized[key] = int(value)
+        return normalized
+
+    return sorted(
+        (normalize_entry(entry) for entry in entries),
+        key=lambda entry: tuple(sorted(entry.items())),
+    )
+
+
+@pytest.mark.parametrize(
+    ["filename", "set_scene", "expected_acquisition_times"],
+    [
+        (
+            "s_1_t_1_c_1_z_1.czi",
+            "Image:0",
+            [{"B": 0, "C": 0, "acquisition_time": "2019-06-27T18:33:41.115421100"}],
+        ),
+        (
+            "s_3_t_1_c_3_z_5.czi",
+            "P2",
+            [
+                {
+                    "B": 0,
+                    "C": 0,
+                    "S": 0,
+                    "Z": 0,
+                    "acquisition_time": "2019-06-27T18:39:26.645970700",
+                },
+                {
+                    "B": 0,
+                    "C": 0,
+                    "S": 0,
+                    "Z": 1,
+                    "acquisition_time": "2019-06-27T18:39:27.476053700",
+                },
+                {
+                    "B": 0,
+                    "C": 0,
+                    "S": 0,
+                    "Z": 2,
+                    "acquisition_time": "2019-06-27T18:39:28.259132000",
+                },
+                {
+                    "B": 0,
+                    "C": 0,
+                    "S": 0,
+                    "Z": 3,
+                    "acquisition_time": "2019-06-27T18:39:29.042210300",
+                },
+                {
+                    "B": 0,
+                    "C": 0,
+                    "S": 0,
+                    "Z": 4,
+                    "acquisition_time": "2019-06-27T18:39:29.844290500",
+                },
+                {
+                    "B": 0,
+                    "C": 1,
+                    "S": 0,
+                    "Z": 0,
+                    "acquisition_time": "2019-06-27T18:39:26.890995200",
+                },
+                {
+                    "B": 0,
+                    "C": 1,
+                    "S": 0,
+                    "Z": 1,
+                    "acquisition_time": "2019-06-27T18:39:27.708076900",
+                },
+                {
+                    "B": 0,
+                    "C": 1,
+                    "S": 0,
+                    "Z": 2,
+                    "acquisition_time": "2019-06-27T18:39:28.490155100",
+                },
+                {
+                    "B": 0,
+                    "C": 1,
+                    "S": 0,
+                    "Z": 3,
+                    "acquisition_time": "2019-06-27T18:39:29.273233400",
+                },
+                {
+                    "B": 0,
+                    "C": 1,
+                    "S": 0,
+                    "Z": 4,
+                    "acquisition_time": "2019-06-27T18:39:30.073313400",
+                },
+                {
+                    "B": 0,
+                    "C": 2,
+                    "S": 0,
+                    "Z": 0,
+                    "acquisition_time": "2019-06-27T18:39:27.116017700",
+                },
+                {
+                    "B": 0,
+                    "C": 2,
+                    "S": 0,
+                    "Z": 1,
+                    "acquisition_time": "2019-06-27T18:39:27.898095900",
+                },
+                {
+                    "B": 0,
+                    "C": 2,
+                    "S": 0,
+                    "Z": 2,
+                    "acquisition_time": "2019-06-27T18:39:28.681174200",
+                },
+                {
+                    "B": 0,
+                    "C": 2,
+                    "S": 0,
+                    "Z": 3,
+                    "acquisition_time": "2019-06-27T18:39:29.483254400",
+                },
+                {
+                    "B": 0,
+                    "C": 2,
+                    "S": 0,
+                    "Z": 4,
+                    "acquisition_time": "2019-06-27T18:39:30.265332600",
+                },
+            ],
+        ),
+        (
+            "s_3_t_1_c_3_z_5.czi",
+            "P3",
+            [
+                {
+                    "B": 0,
+                    "C": 0,
+                    "S": 1,
+                    "Z": 0,
+                    "acquisition_time": "2019-06-27T18:39:31.052411300",
+                },
+                {
+                    "B": 0,
+                    "C": 0,
+                    "S": 1,
+                    "Z": 1,
+                    "acquisition_time": "2019-06-27T18:39:31.860492100",
+                },
+                {
+                    "B": 0,
+                    "C": 0,
+                    "S": 1,
+                    "Z": 2,
+                    "acquisition_time": "2019-06-27T18:39:32.674573500",
+                },
+                {
+                    "B": 0,
+                    "C": 0,
+                    "S": 1,
+                    "Z": 3,
+                    "acquisition_time": "2019-06-27T18:39:33.474653500",
+                },
+                {
+                    "B": 0,
+                    "C": 0,
+                    "S": 1,
+                    "Z": 4,
+                    "acquisition_time": "2019-06-27T18:39:34.255731600",
+                },
+                {
+                    "B": 0,
+                    "C": 1,
+                    "S": 1,
+                    "Z": 0,
+                    "acquisition_time": "2019-06-27T18:39:31.290435100",
+                },
+                {
+                    "B": 0,
+                    "C": 1,
+                    "S": 1,
+                    "Z": 1,
+                    "acquisition_time": "2019-06-27T18:39:32.104516500",
+                },
+                {
+                    "B": 0,
+                    "C": 1,
+                    "S": 1,
+                    "Z": 2,
+                    "acquisition_time": "2019-06-27T18:39:32.903596400",
+                },
+                {
+                    "B": 0,
+                    "C": 1,
+                    "S": 1,
+                    "Z": 3,
+                    "acquisition_time": "2019-06-27T18:39:33.703676400",
+                },
+                {
+                    "B": 0,
+                    "C": 1,
+                    "S": 1,
+                    "Z": 4,
+                    "acquisition_time": "2019-06-27T18:39:34.485754600",
+                },
+                {
+                    "B": 0,
+                    "C": 2,
+                    "S": 1,
+                    "Z": 0,
+                    "acquisition_time": "2019-06-27T18:39:31.496455700",
+                },
+                {
+                    "B": 0,
+                    "C": 2,
+                    "S": 1,
+                    "Z": 1,
+                    "acquisition_time": "2019-06-27T18:39:32.312537300",
+                },
+                {
+                    "B": 0,
+                    "C": 2,
+                    "S": 1,
+                    "Z": 2,
+                    "acquisition_time": "2019-06-27T18:39:33.112617300",
+                },
+                {
+                    "B": 0,
+                    "C": 2,
+                    "S": 1,
+                    "Z": 3,
+                    "acquisition_time": "2019-06-27T18:39:33.895695600",
+                },
+                {
+                    "B": 0,
+                    "C": 2,
+                    "S": 1,
+                    "Z": 4,
+                    "acquisition_time": "2019-06-27T18:39:34.678773900",
+                },
+            ],
+        ),
+        ("RGB-8bit.czi", "Image:0", None),
+        (
+            "variable_per_scene_dims.czi",
+            "P2-D4",
+            [
+                {
+                    "B": 0,
+                    "C": 0,
+                    "S": 1,
+                    "T": 0,
+                    "Z": 0,
+                    "acquisition_time": "2020-01-18T00:16:32.274361400",
+                },
+                {
+                    "B": 0,
+                    "C": 0,
+                    "S": 1,
+                    "T": 0,
+                    "Z": 1,
+                    "acquisition_time": "2020-01-18T00:16:32.617361400",
+                },
+            ],
+        ),
+    ],
+)
+def test_frame_acquisition_times_match_expected_values(
+    filename: str,
+    set_scene: str,
+    expected_acquisition_times: List[dict[str, Any]] | None,
+) -> None:
+    uri = LOCAL_RESOURCES_DIR / filename
+    reader = Reader(uri, use_aicspylibczi=True)
+    reader.set_scene(set_scene)
+
+    acquisition_times = reader.acquisition_times
+
+    if expected_acquisition_times is None:
+        assert not acquisition_times
+        return
+
+    assert acquisition_times is not None
+    assert all(
+        isinstance(entry["acquisition_time"], datetime.datetime)
+        and entry["acquisition_time"].tzinfo is not None
+        for entry in acquisition_times
+    )
+
+    assert _normalize_entries(acquisition_times) == _normalize_entries(
+        expected_acquisition_times
+    )
+
+
+def test_frame_acquisition_times_change_with_scene_selection() -> None:
+    uri = LOCAL_RESOURCES_DIR / "s_3_t_1_c_3_z_5.czi"
+    reader = Reader(uri, use_aicspylibczi=True)
+
+    acquisition_times_by_scene = {}
+    for scene in ("P2", "P3", "P1"):
+        reader.set_scene(scene)
+        acquisition_times = reader.acquisition_times
+        assert acquisition_times is not None
+        normalized = _normalize_entries(acquisition_times)
+        acquisition_times_by_scene[scene] = tuple(
+            tuple(sorted(entry.items())) for entry in normalized
+        )
+
+    # All scenes in this file should have distinct acquisition timelines.
+    assert len(set(acquisition_times_by_scene.values())) == 3
 
 
 # @pytest.mark.parametrize(

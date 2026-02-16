@@ -1,7 +1,7 @@
 import logging
 import xml.etree.ElementTree as ET
 from copy import copy
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Hashable, List, Optional, Tuple, Union
 
@@ -28,7 +28,7 @@ from .. import metadata as metadata_utils
 from ..bounding_box import size
 from ..channels import get_channel_names
 from ..pixel_sizes import get_physical_pixel_sizes
-from .subblock_metadata import time_between_subblocks
+from .subblock_metadata import acquisition_times, time_between_subblocks
 
 ###############################################################################
 
@@ -1019,6 +1019,26 @@ class Reader(BaseReader):
                 m_indexes_to_mosaic_positions[m_index]
                 for m_index in sorted(m_indexes_to_mosaic_positions.keys())
             ]
+
+    @property
+    def acquisition_times(self) -> Optional[list[dict[str, int | datetime]]]:
+        """
+        Return the earliest acquisition time for each mosaic tile and timepoint.
+
+        Returns
+        -------
+        Optional[list[dict[str, int | datetime]]]:
+            A list of dictionaries, each containing subblock info and the corresponding
+            acquisition time under the key "acquisition_time".
+            Returns None if extraction fails.
+        """
+
+        with self._fs.open(self._path) as open_resource:
+            czi = CziFile(open_resource.f)
+            return acquisition_times(
+                czi=czi,
+                current_scene=self.current_scene_index,
+            )
 
     @property
     def time_interval(self) -> Optional[timedelta]:

@@ -1,8 +1,9 @@
 # Support use of type Reader inside definition of Reader
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
-from typing import Any, List, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union
 from xml.etree import ElementTree
 
 import xarray as xr
@@ -406,6 +407,21 @@ class Reader(BaseReader):
             The image has no mosaic dimension available.
         """
         return self._implementation.get_mosaic_tile_positions(**kwargs)
+
+    @property
+    def acquisition_times(self) -> Optional[list[dict[str, int | datetime]]]:
+        """
+        Return per-mosaic acquisition times when available.
+
+        Returns
+        -------
+        Optional[list[dict[str, int | datetime]]]
+            A list of dictionaries, each containing indices such as
+            `{"C":1, "Z":10}` and the corresponding acquisition time
+            under the key "acquisition_time"
+            when supported by the underlying implementation; otherwise, None.
+        """
+        return getattr(self._implementation, "acquisition_times", None)
 
     @property
     def time_interval(self) -> TimeInterval:
