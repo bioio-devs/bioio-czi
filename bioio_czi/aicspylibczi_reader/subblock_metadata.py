@@ -88,8 +88,12 @@ def acquisition_times(
     -------
     Optional[list[dict[str, int | datetime]]]:
         A list of dictionaries, each containing subblock info and the corresponding
-        acquisition time under the key "acquisition_time".
-        Returns None if extraction fails.
+        acquisition time under the key "acquisition_time". The timezone of the
+        acquisition times is preserved if available in the source metadata,
+        and defaults to UTC if missing. The timezone may differ from the
+        timezone of that for the local microscope, since the CZI file typically saves
+        the timestamp in UTC, irrespective of the local timezone of the system
+        where the file was created. Returns None if extraction fails.
     """
 
     try:
