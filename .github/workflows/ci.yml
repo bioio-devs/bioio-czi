@@ -37,11 +37,9 @@ jobs:
   lint-test:
     uses: bioio-devs/bioio-base/.github/workflows/reusable-lint-test.yml@feature/55-shared-workflow
     with:
-      lint-python-version: "3.13"
-      test-python-versions: '["3.10", "3.11", "3.12", "3.13"]'
-      test-checkout-submodules: "recursive"
-      test-checkout-lfs: true
-      lint-checkout-submodules: "recursive"
+      test_checkout_submodules: "recursive"
+      test_checkout_lfs: true
+      lint_checkout_submodules: "recursive"
 
   # Check package performance
   benchmark:
