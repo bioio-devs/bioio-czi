@@ -33,17 +33,23 @@ jobs:
           python-version: "3.x"
       - run: pip install check-manifest && check-manifest
 
-  # Shared lint + test workflow from bioio-base
-  lint-test:
-    uses: bioio-devs/bioio-base/.github/workflows/reusable-lint-test.yml@feature/55-shared-workflow
+  # Shared lint workflow from bioio-base
+  lint:
+    uses: bioio-devs/bioio-base/.github/workflows/shared_lint.yml@feature/55-shared-workflow
+    with:
+      lint_checkout_submodules: "recursive"
+
+  # Shared test workflow from bioio-base
+  test:
+    needs: [lint]
+    uses: bioio-devs/bioio-base/.github/workflows/shared_test.yml@feature/55-shared-workflow
     with:
       test_checkout_submodules: "recursive"
       test_checkout_lfs: true
-      lint_checkout_submodules: "recursive"
 
   # Check package performance
   benchmark:
-    needs: [lint-test]
+    needs: [lint, test]
     runs-on: ubuntu-latest
 
     steps:
@@ -73,7 +79,7 @@ jobs:
   # Publish to PyPI if test, lint, and manifest checks passed
   publish:
     if: "success() && startsWith(github.ref, 'refs/tags/')"
-    needs: [check-manifest, lint-test]
+    needs: [check-manifest, lint, test]
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -107,7 +113,7 @@ jobs:
   # all the other checks pass.
   results:
     if: ${{ always() && github.event_name == 'pull_request' }}
-    needs: [check-manifest, lint-test]
+    needs: [check-manifest, lint, test]
     runs-on: ubuntu-latest
     name: Report Result
     steps:
