@@ -35,14 +35,14 @@ jobs:
 
   # Shared lint workflow from bioio-base
   lint:
-    uses: bioio-devs/bioio-base/.github/workflows/shared_lint.yml@feature/55-shared-workflow
+    uses: bioio-devs/bioio-base/.github/workflows/shared_lint.yml@main
     with:
       lint_checkout_submodules: "recursive"
 
   # Shared test workflow from bioio-base
   test:
     needs: [lint]
-    uses: bioio-devs/bioio-base/.github/workflows/shared_test.yml@feature/55-shared-workflow
+    uses: bioio-devs/bioio-base/.github/workflows/shared_test.yml@main
     with:
       test_checkout_submodules: "recursive"
       test_checkout_lfs: true
