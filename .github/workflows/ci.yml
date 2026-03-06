@@ -33,62 +33,23 @@ jobs:
           python-version: "3.x"
       - run: pip install check-manifest && check-manifest
 
-  # Check linting, formating, types, etc.
+  # Shared lint workflow from bioio-base
   lint:
-    runs-on: ubuntu-latest
+    uses: bioio-devs/bioio-base/.github/workflows/shared_lint.yml@main
+    with:
+      lint_checkout_submodules: "recursive"
 
-    steps:
-    - uses: actions/checkout@v6
-      with:
-        submodules: "recursive"
-    - name: Set up Python
-      uses: actions/setup-python@v6
-      with:
-        python-version: "3.13"
-    - uses: extractions/setup-just@v3
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    - name: Install Dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install .[lint]
-    - name: Lint
-      run: just lint
-  
-  # Check tests pass on multiple Python and OS combinations
+  # Shared test workflow from bioio-base
   test:
-    runs-on: ${{ matrix.os }}
     needs: [lint]
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.10", 3.11, 3.12, 3.13]
-        os: [ubuntu-latest, macOS-latest, windows-latest]
-
-    steps:
-    - uses: actions/checkout@v6
-      with:
-        submodules: "recursive"
-        lfs: true # For test files
-    - name: Set up Python
-      uses: actions/setup-python@v6
-      with:
-        python-version: ${{ matrix.python-version }}
-    - uses: extractions/setup-just@v3
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    - name: Install Dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install .[test]
-    - name: Run Tests
-      run: just test
-    - name: Upload Codecov
-      uses: codecov/codecov-action@v5
+    uses: bioio-devs/bioio-base/.github/workflows/shared_test.yml@main
+    with:
+      test_checkout_submodules: "recursive"
+      test_checkout_lfs: true
 
   # Check package performance
   benchmark:
-    needs: [lint]
+    needs: [lint, test]
     runs-on: ubuntu-latest
 
     steps:
@@ -118,7 +79,7 @@ jobs:
   # Publish to PyPI if test, lint, and manifest checks passed
   publish:
     if: "success() && startsWith(github.ref, 'refs/tags/')"
-    needs: [check-manifest, test, lint]
+    needs: [check-manifest, lint, test]
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -152,7 +113,7 @@ jobs:
   # all the other checks pass.
   results:
     if: ${{ always() && github.event_name == 'pull_request' }}
-    needs: [check-manifest, test, lint]
+    needs: [check-manifest, lint, test]
     runs-on: ubuntu-latest
     name: Report Result
     steps:
