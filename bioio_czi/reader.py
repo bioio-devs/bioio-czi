@@ -308,10 +308,43 @@ class Reader(BaseReader):
             This likely isn't a complete transformation but is guarenteed to
             be a valid transformation.
         """
-        return metadata.transform_metadata_with_xslt(
+        ome = metadata.transform_metadata_with_xslt(
             self._implementation.metadata,
             Path(__file__).parent / "czi-to-ome-xslt/xslt/czi-to-ome.xsl",
         )
+
+        # NOTE:
+        # The OME metadata generated via XSLT reflects the raw CZI XML, which may
+        # describe the original acquisition frame dimensions. However, the actual
+        # pixel data exposed by this reader is derived from pylibCZIrw bounding boxes
+        # (e.g., scene-specific ROI, stitching, and no-pyramid extents), which can
+        # differ from the XML-reported sizes.
+        #
+        # This can lead to mismatches between `reader.shape` and
+        # `ome_metadata.images[0].pixels.{size_x, size_y}`, particularly for
+        # mosaics or scenes with adjusted bounding regions.
+        #
+        # To ensure consistency and correctness for downstream consumers, we
+        # normalize the OME Pixel sizes to match the dimensions of the data
+        # actually returned by the reader.
+        if not ome.images:
+            return ome
+
+        pixels = ome.images[0].pixels
+        dim_to_size = dict(zip(self.dims.order, self.shape))
+
+        if "X" in dim_to_size:
+            pixels.size_x = dim_to_size["X"]
+        if "Y" in dim_to_size:
+            pixels.size_y = dim_to_size["Y"]
+        if "Z" in dim_to_size:
+            pixels.size_z = dim_to_size["Z"]
+        if "C" in dim_to_size:
+            pixels.size_c = dim_to_size["C"]
+        if "T" in dim_to_size:
+            pixels.size_t = dim_to_size["T"]
+
+        return ome
 
     @property
     def physical_pixel_sizes(self) -> PhysicalPixelSizes:
