@@ -310,3 +310,23 @@ def test_scene_stack_consistency() -> None:
     stack_xr_da = reader.get_xarray_dask_stack()
     assert stack_xr_da.shape == expected.shape
     np.testing.assert_array_equal(stack_xr_da.data.compute(), expected)
+
+
+def test_ome_metadata_matches_exposed_shape_for_bounding_box_discrepant_czi() -> None:
+    uri = LOCAL_RESOURCES_DIR / "ome_bounding_box_discrepant.czi"
+
+    reader = Reader(uri)
+
+    # Sanity check the exposed data view that triggered the bug report.
+    assert reader.dims.order == "CZYX"
+    assert reader.shape == (3, 13, 2101, 2101)
+
+    pixels = reader.ome_metadata.images[0].pixels
+
+    # OME metadata should describe the same image shape exposed by the reader.
+    dim_to_size = dict(zip(reader.dims.order, reader.shape))
+
+    assert pixels.size_c == dim_to_size["C"]
+    assert pixels.size_z == dim_to_size["Z"]
+    assert pixels.size_y == dim_to_size["Y"]
+    assert pixels.size_x == dim_to_size["X"]
