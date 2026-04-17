@@ -336,20 +336,22 @@ class Reader(BaseReader):
             len(coords[d]) if d in coords else size(self._total_bounding_box, d)
             for d in ordered_dims
         )
-        # E.g., shape_without_yx = (30, 2, 20)
-        shape_without_yx = shape[:-2]
-
-        chunk_shape = shape[-2:]
-        if "Bgr" in self._pixel_types[0]:
-            # If the image is BGR, each chunk has shape (X, Y, 3)
-            chunk_shape += (3,)
-            ordered_dims.append(DimensionNames.Samples)
-
-        # 5. Create delayed chunks
         # The Y and X shape of lazy_arrays are both 1 because we are making each YX
         # slice a single chunk.
         # E.g., lazy_arrays.shape = (30, 2, 20, 1, 1)
-        lazy_arrays: np.ndarray = np.ndarray(shape_without_yx + (1, 1), dtype=object)
+        shape_for_lazyarrays = shape[:-2] + (1, 1)
+
+        chunk_shape = shape[-2:]
+        if "Bgr" in self._pixel_types[0]:
+            # If the image is BGR, each chunk has shape (X, Y, 3)...
+            chunk_shape += (3,)
+            ordered_dims.append(DimensionNames.Samples)
+            # ...and we also need to reflect this in the shape of the lazy_arrays
+            # All the Y, X *and* S points for a slice are in a single chunk
+            shape_for_lazyarrays += (1,)
+
+        # 5. Create delayed chunks
+        lazy_arrays: np.ndarray = np.ndarray(shape_for_lazyarrays, dtype=object)
         for np_index, _ in np.ndenumerate(lazy_arrays):
             lazy_arrays[np_index] = da.from_delayed(
                 delayed(self._array_builder(non_yx_dims))(np_index),
