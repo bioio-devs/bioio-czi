@@ -93,6 +93,16 @@ from .conftest import LOCAL_RESOURCES_DIR
             (None, 1.0833333333333333, 1.0833333333333333),
         ),
         (
+            "RGB-8bit-with-non-xy-dims.czi",
+            "Image:0",
+            ("Image:0",),
+            (1, 624, 924, 3),
+            np.uint8,
+            "ZYXS",
+            None,
+            (0.0, 1.0833333333333302, 1.0833333333333302),
+        ),
+        (
             "variable_per_scene_dims.czi",
             "P2-D4",
             ("P1-D4", "P2-D4"),
