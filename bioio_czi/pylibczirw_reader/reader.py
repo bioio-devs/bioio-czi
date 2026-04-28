@@ -195,6 +195,17 @@ class Reader(BaseReader):
 
         return coords
 
+    @property
+    def czi_scene_index(self) -> int:
+        """
+        Returns the plate-level CZI scene index for the current scene.
+
+        For split CZI files (one plate position per file), this differs from
+        current_scene_index (which is always 0) because the embedded XML metadata
+        still uses the original plate-wide scene indices.
+        """
+        return self._get_czi_scene_index()
+
     def _get_czi_scene_index(self, scene_index: Optional[int] = None) -> int:
         """
         Map a BioIO scene index (0..N-1) to the underlying CZI scene index.
