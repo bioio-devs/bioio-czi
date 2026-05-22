@@ -1107,9 +1107,14 @@ class Reader(BaseReader):
         try:
             with self._fs.open(self._path) as open_resource:
                 czi = CziFile(open_resource.f)
+                scene = Reader._adjust_scene_index(
+                    czi.get_dims_shape(),
+                    self.current_scene_index,
+                    czi.shape_is_consistent,
+                )
                 duration_ms = time_between_subblocks(
                     czi,
-                    self.current_scene_index,
+                    scene,
                     start_frame=0,
                     # Index of the last timepoint is one less than the number of
                     # timepoints
