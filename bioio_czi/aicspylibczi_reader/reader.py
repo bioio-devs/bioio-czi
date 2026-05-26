@@ -895,6 +895,21 @@ class Reader(BaseReader):
         return self._construct_mosaic_xarray(self.data)
 
     @property
+    def czi_scene_index(self) -> int:
+        """
+        Returns the plate-level CZI scene index for the current scene.
+
+        For split CZI files (one plate position per file), this differs from
+        current_scene_index (which is always 0) because the embedded XML metadata
+        still uses the original plate-wide scene indices.
+        """
+        with self._fs.open(self._path) as open_resource:
+            czi = CziFile(open_resource.f)
+            return Reader._adjust_scene_index(
+                czi.get_dims_shape(), self.current_scene_index, czi.shape_is_consistent
+            )
+
+    @property
     def physical_pixel_sizes(self) -> types.PhysicalPixelSizes:
         """
         Returns

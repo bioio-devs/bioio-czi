@@ -482,11 +482,10 @@ class Reader(BaseReader):
         # 2. Most of the remaining implementation is identical across pylibczirw and
         # aicspylibczi modes, so it is shared here. The self-contained standard_metadata
         # module holds the implementation for extracting these from the metadata.
-        metadata.column = standard_metadata.column(
-            self.metadata, self.current_scene_index
-        )
+        czi_scene_index = self._implementation.czi_scene_index
+        metadata.column = standard_metadata.column(self.metadata, czi_scene_index)
         metadata.position_index = standard_metadata.position_index(self.current_scene)
-        metadata.row = standard_metadata.row(self.metadata, self.current_scene_index)
+        metadata.row = standard_metadata.row(self.metadata, czi_scene_index)
 
         # 3. Finally, total_time_duration is mode-specific, as only aicspylibczi mode
         # has access to the necessary subblock metadata.
