@@ -830,16 +830,18 @@ class Reader(BaseReader):
         # Get max of mosaic positions from lif
         with self._fs.open(self._path) as open_resource:
             czi = CziFile(open_resource.f)
+            czi_dims_shape = czi.get_dims_shape()
+            czi_scene_index = Reader._adjust_scene_index(
+                czi_dims_shape, self.current_scene_index, czi.shape_is_consistent
+            )
             dims_shape = Reader._dims_shape_to_scene_dims_shape(
-                dims_shape=czi.get_dims_shape(),
+                dims_shape=czi_dims_shape,
                 scene_index=self.current_scene_index,
                 consistent=czi.shape_is_consistent,
             )
 
-            bboxes = czi.get_all_mosaic_tile_bounding_boxes(S=self.current_scene_index)
-            mosaic_scene_bbox = czi.get_mosaic_scene_bounding_box(
-                index=self.current_scene_index
-            )
+            bboxes = czi.get_all_mosaic_tile_bounding_boxes(S=czi_scene_index)
+            mosaic_scene_bbox = czi.get_mosaic_scene_bounding_box(index=czi_scene_index)
 
             # Stitch
             stitched = self._stitch_tiles(
@@ -975,6 +977,9 @@ class Reader(BaseReader):
 
         with self._fs.open(self._path) as open_resource:
             czi = CziFile(open_resource.f)
+            czi_scene_index = Reader._adjust_scene_index(
+                czi.get_dims_shape(), self.current_scene_index, czi.shape_is_consistent
+            )
 
             # Default Channel and Time dimensions to 0 to improve
             # worst case read time for large files **only**
@@ -984,7 +989,7 @@ class Reader(BaseReader):
                     kwargs[dimension_name] = 0
 
             bbox = czi.get_mosaic_tile_bounding_box(
-                M=mosaic_tile_index, S=self.current_scene_index, **kwargs
+                M=mosaic_tile_index, S=czi_scene_index, **kwargs
             )
             return bbox.y, bbox.x
 
@@ -1018,9 +1023,12 @@ class Reader(BaseReader):
 
         with self._fs.open(self._path) as open_resource:
             czi = CziFile(open_resource.f)
+            czi_scene_index = Reader._adjust_scene_index(
+                czi.get_dims_shape(), self.current_scene_index, czi.shape_is_consistent
+            )
 
             tile_info_to_bboxes = czi.get_all_mosaic_tile_bounding_boxes(
-                S=self.current_scene_index, **kwargs
+                S=czi_scene_index, **kwargs
             )
 
             # Convert dictionary of tile info mappings to
