@@ -9,7 +9,6 @@ A BioIO reader plugin for reading CZIs using `pylibczirw` (default) or `aicspyli
 
 ---
 
-
 ## Documentation
 
 [See the bioio documentation on our GitHub pages site](https://bioio-devs.github.io/bioio/OVERVIEW.html) - the general use and installation instructions there will work for this package.
@@ -29,29 +28,32 @@ Install bioio-czi alongside bioio:
 **Development Head:** `pip install git+https://github.com/bioio-devs/bioio-czi.git`
 
 ## pylibczirw vs. aicspylibczi
-`bioio-czi` can operate in [pylibczirw](https://github.com/ZEISS/pylibczirw) mode (the default) or [aicspylibczi](https://github.com/AllenCellModeling/aicspylibczi) mode.
 
-| Feature | pylibczirw mode | aicspylibczi mode |
-|--|--|--|
-| Read CZIs from the internet | ✅ | ❌ |
-| Read single tile from tiled CZI | ❌ | ✅ |
-| Read single tile's metadata from tiled CZI | ❌ | ✅ |
-| Read elapsed time metadata* | ❌ | ✅ |
-| Handle CZIs with different dimensions per scene** | ❌ | ✅ |
-| Read stitched mosaic of a tiled CZI | ✅ | ✅ |
+`bioio-czi` can operate in [pylibczirw](https://github.com/ZEISS/pylibczirw) mode (the default) or [aicspylibczi](https://github.com/bioio-devs/aicspylibczi) mode.
+
+| Feature                                             | pylibczirw mode | aicspylibczi mode |
+| --------------------------------------------------- | --------------- | ----------------- |
+| Read CZIs from the internet                         | ✅              | ❌                |
+| Read single tile from tiled CZI                     | ❌              | ✅                |
+| Read single tile's metadata from tiled CZI          | ❌              | ✅                |
+| Read elapsed time metadata\*                        | ❌              | ✅                |
+| Handle CZIs with different dimensions per scene\*\* | ❌              | ✅                |
+| Read stitched mosaic of a tiled CZI                 | ✅              | ✅                |
 
 The primary difference is that `pylibczirw` supports reading CZIs over the internet but cannot access individual tiles from a tiled CZI. To use `aicspylibczi`, add the `use_aicspylibczi=True` parameter when creating a reader. For example: `from bioio import BioImage; img = BioImage(..., use_aicspylibczi=True)`.
 
-*Elapsed time metadata include the following. These are derived from individual subblock metadata.
-* `BioImage(...).time_interval`
-* `BioImage(...).standard_metadata.timelapse_interval`
-* `BioImage(...).standard_metadata.total_time_duration`
+\*Elapsed time metadata include the following. These are derived from individual subblock metadata.
 
-**The underlying pylibczirw reader only exposes per-scene X and Y dimensions. Files that do not have consistent dimensions per scene may be read incorrectly in pylibczirw mode.
+- `BioImage(...).time_interval`
+- `BioImage(...).standard_metadata.timelapse_interval`
+- `BioImage(...).standard_metadata.total_time_duration`
+
+\*\*The underlying pylibczirw reader only exposes per-scene X and Y dimensions. Files that do not have consistent dimensions per scene may be read incorrectly in pylibczirw mode.
 
 ## Example Usage (see full documentation for more examples)
 
 ### Basic usage
+
 ```python
 from bioio import BioImage
 
@@ -63,9 +65,11 @@ path = (
 img = BioImage(path)
 print(img.shape)  # (1, 1, 1, 5684, 5925)
 ```
+
 Note: accessing files from the internet is not available in `aicspylibczi` mode.
 
 ### Individual tiles with aicspylibczi
+
 ```python
 img = BioImage(
     "S=2_4x2_T=2=Z=3_CH=2.czi",
@@ -78,21 +82,26 @@ subblocks = img.metadata.findall("./Subblocks/Subblock")
 print(len(subblocks))  # 192
 print(img.get_image_data("TCZYX", M=3).shape)  # (2, 2, 3, 256, 256)
 ```
+
 The `M` dimension is used to select a specific tile.
 
 ### Stitched mosaic with pylibczirw
+
 ```python
 img = BioImage("S=2_4x2_T=2=Z=3_CH=2.czi")
 print(img.dims)  # <Dimensions [T: 2, C: 2, Z: 3, Y: 487, X: 947]>
 ```
+
 All 8 tiles are stitched together. Where tiles overlap, the pixel value is the pixel value from the tile with the highest M-index.
 
 ### Explicit Reader
+
 This example shows a simple use case for just accessing the pixel data of the image
 by explicitly passing this `Reader` into the `BioImage`. Passing the `Reader` into
 the `BioImage` instance is optional as `bioio` will automatically detect installed
 plug-ins and auto-select the most recently installed plug-in that supports the file
 passed in.
+
 ```python
 from bioio import BioImage
 import bioio_czi
@@ -102,8 +111,8 @@ img.data
 ```
 
 ## Issues
-[_Click here to view all open issues in bioio-devs organization at once_](https://github.com/search?q=user%3Abioio-devs+is%3Aissue+is%3Aopen&type=issues&ref=advsearch) or check this repository's issue tab.
 
+[_Click here to view all open issues in bioio-devs organization at once_](https://github.com/search?q=user%3Abioio-devs+is%3Aissue+is%3Aopen&type=issues&ref=advsearch) or check this repository's issue tab.
 
 ## Development
 
