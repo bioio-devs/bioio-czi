@@ -149,6 +149,7 @@ class Reader(BaseReader):
         # Delayed storage
         self._px_sizes: Optional[types.PhysicalPixelSizes] = None
         self._mapped_dims: Optional[str] = None
+        self._czi_scene_index: Optional[int] = None
 
         # Enforce valid image
         if not self._is_supported_image(self._fs, self._path):
@@ -169,6 +170,7 @@ class Reader(BaseReader):
         super()._reset_self()
         self._mapped_dims = None
         self._px_sizes = None
+        self._czi_scene_index = None
 
     @staticmethod
     def _fix_czi_dims(dims: str) -> str:
@@ -836,9 +838,9 @@ class Reader(BaseReader):
                 consistent=czi.shape_is_consistent,
             )
 
-            bboxes = czi.get_all_mosaic_tile_bounding_boxes(S=self.current_scene_index)
+            bboxes = czi.get_all_mosaic_tile_bounding_boxes(S=self.czi_scene_index)
             mosaic_scene_bbox = czi.get_mosaic_scene_bounding_box(
-                index=self.current_scene_index
+                index=self.czi_scene_index
             )
 
             # Stitch
@@ -903,11 +905,15 @@ class Reader(BaseReader):
         current_scene_index (which is always 0) because the embedded XML metadata
         still uses the original plate-wide scene indices.
         """
-        with self._fs.open(self._path) as open_resource:
-            czi = CziFile(open_resource.f)
-            return Reader._adjust_scene_index(
-                czi.get_dims_shape(), self.current_scene_index, czi.shape_is_consistent
-            )
+        if self._czi_scene_index is None:
+            with self._fs.open(self._path) as open_resource:
+                czi = CziFile(open_resource.f)
+                self._czi_scene_index = Reader._adjust_scene_index(
+                    czi.get_dims_shape(),
+                    self.current_scene_index,
+                    czi.shape_is_consistent,
+                )
+        return self._czi_scene_index
 
     @property
     def physical_pixel_sizes(self) -> types.PhysicalPixelSizes:
@@ -984,7 +990,7 @@ class Reader(BaseReader):
                     kwargs[dimension_name] = 0
 
             bbox = czi.get_mosaic_tile_bounding_box(
-                M=mosaic_tile_index, S=self.current_scene_index, **kwargs
+                M=mosaic_tile_index, S=self.czi_scene_index, **kwargs
             )
             return bbox.y, bbox.x
 
@@ -1020,7 +1026,7 @@ class Reader(BaseReader):
             czi = CziFile(open_resource.f)
 
             tile_info_to_bboxes = czi.get_all_mosaic_tile_bounding_boxes(
-                S=self.current_scene_index, **kwargs
+                S=self.czi_scene_index, **kwargs
             )
 
             # Convert dictionary of tile info mappings to
@@ -1052,7 +1058,7 @@ class Reader(BaseReader):
             czi = CziFile(open_resource.f)
             return acquisition_times(
                 czi=czi,
-                current_scene=self.current_scene_index,
+                current_scene=self.czi_scene_index,
             )
 
     @property
@@ -1109,7 +1115,7 @@ class Reader(BaseReader):
                 czi = CziFile(open_resource.f)
                 duration_ms = time_between_subblocks(
                     czi,
-                    self.current_scene_index,
+                    self.czi_scene_index,
                     start_frame=0,
                     # Index of the last timepoint is one less than the number of
                     # timepoints
