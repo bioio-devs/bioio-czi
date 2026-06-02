@@ -142,6 +142,16 @@ def test_subblocks(filename: str, num_subblocks: int, acquistion_time: str) -> N
             ["CMDRP"],
             (2.23, 0.5416666666666666, 0.5416666666666666),
         ),
+        (
+            "mosaic_split_plate_scene_index_offset.czi",
+            "B7-B7",
+            ("B7-B7",),
+            (1, 50, 1248, 1848),
+            np.uint16,
+            "CMYX",
+            ["Bright ONLY"],
+            (None, 0.5416666666666666, 0.5416666666666666),
+        ),
         pytest.param(
             "variable_scene_shape_first_scene_pyramid.czi",
             "A1",
@@ -721,6 +731,13 @@ def test_czi_reader_mosaic_tile_inspection(
             np.arange(0, 2488.45326089585, 4.5743626119409),
             np.arange(0, 14692.852709554172, 4.5743626119409),
             np.arange(0, 33836.560240526844, 4.5743626119409),
+        ),
+        (
+            "mosaic_split_plate_scene_index_offset.czi",
+            np.arange(0, 1248 * 0.5416666666666666, 0.5416666666666666),
+            np.arange(0, 1848 * 0.5416666666666666, 0.5416666666666666),
+            np.arange(0, 10233 * 0.5416666666666666, 0.5416666666666666),
+            np.arange(0, 10164 * 0.5416666666666666, 0.5416666666666666),
         ),
     ],
 )
