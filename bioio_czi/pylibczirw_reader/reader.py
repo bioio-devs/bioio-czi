@@ -1,8 +1,9 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+import itertools
 import logging
-from typing import Any, Callable, ContextManager, Dict, Optional, Tuple, Union
+from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple, Union
 from xml.etree import ElementTree as ET
 
 import dask.array as da
@@ -251,15 +252,7 @@ class Reader(BaseReader):
         """
 
         # Freeze the scene / ROI for lazy builder invocation.
-        if len(self._scenes_bounding_rectangle) == 0:
-            # Some files have no scenes but can still be read if scene is not
-            # specified.
-            current_scene: int | None = None
-            current_roi = None
-        else:
-            czi_scene_index = self._get_czi_scene_index()
-            current_scene = czi_scene_index
-            current_roi = self._scenes_bounding_rectangle[czi_scene_index]
+        current_scene, current_roi = self._current_scene_roi()
 
         def array_builder(indices: tuple[int]) -> int:
             assert len(indices) >= len(
@@ -267,27 +260,6 @@ class Reader(BaseReader):
             ), f"Expected {len(indices)} >= {len(index_dims)}."
             # E.g., plane = {'T': 0, 'C': 1, 'Z': 2}
             plane = {d: indices[i] for i, d in enumerate(index_dims)}
-            # The purpose of the next 2 lines is complicated.
-            # ROI stands for Region Of Interest.
-            #
-            # In pylibczi's read method, the default ROI is the bounding
-            # rectangle of the scene **across all zoom levels**. We are going to
-            # read just the highest resolution level (zoom = 1), which is
-            # smaller than the default ROI in some cases. For example,
-            # scene 0 of the test file S=2_4x2_T=2=Z=3_CH=2.czi is 947x487 when
-            # looking at only the highest resolution, but is 948x488 when
-            # all zoom levels are considered. (I believe this is because at zoom
-            # 0.5, the result is ceiling(947/2) x ceiling(487/2).)
-            #
-            # See also: file.scenes_bounding_rectangle vs.
-            # file.scenes_bounding_rectangle_no_pyramid.
-            #
-            # Therefore, when calling read, we crop to just the ROI of the
-            # highest resolution level.
-            #
-            # NOTE: self._current_scene_index is a BioIO scene index (0..N-1).
-            # We must map it to the underlying CZI scene index before using it
-            # with pylibczirw or _scenes_bounding_rectangle.
             with open(self._path) as file:
                 result = file.read(scene=current_scene, plane=plane, roi=current_roi)
             # result.shape is (Y, X, 1) or (Y, X, 3) depending on whether it's RGB
@@ -295,6 +267,81 @@ class Reader(BaseReader):
             return np.squeeze(result)
 
         return array_builder
+
+    def _current_scene_roi(self) -> Tuple[Optional[int], Any]:
+        """
+        Resolve the ``(czi_scene_index, highest-resolution ROI)`` for the current
+        scene, for use with ``file.read(scene=, roi=)``.
+
+        ROI stands for Region Of Interest. In pylibczi's read method, the default
+        ROI is the bounding rectangle of the scene **across all zoom levels**. We
+        read just the highest resolution level (zoom = 1), which is smaller than
+        the default ROI in some cases. For example, scene 0 of the test file
+        S=2_4x2_T=2=Z=3_CH=2.czi is 947x487 at the highest resolution, but 948x488
+        when all zoom levels are considered. (At zoom 0.5 the result is
+        ceiling(947/2) x ceiling(487/2).) See also file.scenes_bounding_rectangle
+        vs. file.scenes_bounding_rectangle_no_pyramid.
+
+        NOTE: self._current_scene_index is a BioIO scene index (0..N-1); it is
+        mapped to the underlying CZI scene index before use with pylibczirw or
+        _scenes_bounding_rectangle.
+        """
+        # Some files have no scenes but can still be read if scene is not specified.
+        if len(self._scenes_bounding_rectangle) == 0:
+            return None, None
+        czi_scene_index = self._get_czi_scene_index()
+        return czi_scene_index, self._scenes_bounding_rectangle[czi_scene_index]
+
+    def _read_indexed(self, given_dims: str, dim_specs: list) -> np.ndarray:
+        """
+        Read only the requested non-spatial planes for ``get_image_data``.
+
+        Cullable dims (everything before Y: T/C/Z/M/...) are read one plane at a
+        time; spatial dims (Y, X, and Samples for BGR) are read whole-plane and
+        cropped in memory via ``plane_specs``. The result matches
+        ``self.data[tuple(dim_specs)]`` — integer specs drop their axis.
+        """
+        y_index = given_dims.index(DimensionNames.SpatialY)
+        cullable_dims = given_dims[:y_index]  # e.g. "TCZ"
+        plane_specs = tuple(dim_specs[y_index:])  # Y, X, and Samples (BGR)
+
+        # Resolve each cullable dim to (out_pos | None, plane_index) tuples.
+        # out_pos is None for fixed (integer) dims whose axis is dropped.
+        enumerated: List[list] = []
+        for i, _dim in enumerate(cullable_dims):
+            spec = dim_specs[i]
+            size_i = self.shape[i]
+            if isinstance(spec, slice):
+                enumerated.append(list(enumerate(range(*spec.indices(size_i)))))
+            elif isinstance(spec, list):
+                enumerated.append(list(enumerate([j % size_i for j in spec])))
+            else:  # int -> fixed, axis dropped
+                enumerated.append([(None, int(spec) % size_i)])
+
+        kept_lengths = [
+            len(e)
+            for e, spec in zip(enumerated, dim_specs[:y_index])
+            if not isinstance(spec, (int, np.integer))
+        ]
+
+        scene, roi = self._current_scene_roi()
+        out: Optional[np.ndarray] = None
+        with open(self._path) as file:
+            for combo in itertools.product(*enumerated):
+                out_pos = tuple(pos for pos, _idx in combo if pos is not None)
+                plane = {d: idx for (d, (_pos, idx)) in zip(cullable_dims, combo)}
+                result = np.squeeze(file.read(scene=scene, plane=plane, roi=roi))
+                cropped = result[plane_specs]
+                if out is None:
+                    out = np.empty(
+                        tuple(kept_lengths) + cropped.shape, dtype=cropped.dtype
+                    )
+                out[out_pos] = cropped
+
+        if out is None:
+            # Empty selection along a kept dim; build a correctly-shaped empty.
+            out = np.empty(tuple(kept_lengths), dtype=self.dtype)
+        return out
 
     def _read_delayed(self) -> xr.DataArray:
         """

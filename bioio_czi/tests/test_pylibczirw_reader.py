@@ -340,3 +340,54 @@ def test_ome_metadata_matches_exposed_shape_for_bounding_box_discrepant_czi() ->
     assert pixels.size_z == dim_to_size["Z"]
     assert pixels.size_y == dim_to_size["Y"]
     assert pixels.size_x == dim_to_size["X"]
+
+
+# ---------------------------------------------------------------------------
+# Fast sub-slice read optimization (get_image_data reads only requested planes)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "filename, order, kwargs",
+    [
+        ("s_3_t_1_c_3_z_5.czi", "ZYX", {"C": 1}),
+        ("s_3_t_1_c_3_z_5.czi", "CZYX", {"C": [0, 2]}),
+        ("s_3_t_1_c_3_z_5.czi", "CZYX", {"Z": slice(0, 4, 2)}),
+        ("s_3_t_1_c_3_z_5.czi", "CZYX", {"C": (0, -1)}),
+        ("RGB-8bit.czi", "YXS", {}),
+        ("RGB-8bit-with-non-xy-dims.czi", "ZYXS", {"Z": 0}),
+        ("RGB-8bit-with-non-xy-dims.czi", "YXS", {"Z": 0, "S": slice(0, 2)}),
+    ],
+)
+def test_get_image_data_matches_full_slice_pylibczirw(
+    filename: str, order: str, kwargs: dict
+) -> None:
+    from bioio_base import transforms
+
+    reader = Reader(LOCAL_RESOURCES_DIR / filename)._implementation
+    expected = transforms.reshape_data(
+        reader.data, reader.dims.order, order, **kwargs
+    )
+    actual = reader.get_image_data(order, **kwargs)
+    np.testing.assert_array_equal(actual, expected)
+
+
+def test_get_image_data_reads_only_requested_planes_pylibczirw(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pylibCZIrw import czi as _pyczi
+
+    reader = Reader(LOCAL_RESOURCES_DIR / "s_3_t_1_c_3_z_5.czi")._implementation
+    # s_3_t_1_c_3_z_5: T=1, C=3, Z=5 -> dims CZYX. C=1 over Z=5 should read 5 planes.
+    assert reader.dims.order == "CZYX"
+
+    calls = {"n": 0}
+    real_read = _pyczi.CziReader.read
+
+    def counting_read(self: object, *args: object, **kwargs: object) -> object:
+        calls["n"] += 1
+        return real_read(self, *args, **kwargs)
+
+    monkeypatch.setattr(_pyczi.CziReader, "read", counting_read)
+    reader.get_image_data("ZYX", C=1)
+    assert calls["n"] == 5
