@@ -365,9 +365,7 @@ def test_get_image_data_matches_full_slice_pylibczirw(
     from bioio_base import transforms
 
     reader = Reader(LOCAL_RESOURCES_DIR / filename)._implementation
-    expected = transforms.reshape_data(
-        reader.data, reader.dims.order, order, **kwargs
-    )
+    expected = transforms.reshape_data(reader.data, reader.dims.order, order, **kwargs)
     actual = reader.get_image_data(order, **kwargs)
     np.testing.assert_array_equal(actual, expected)
 

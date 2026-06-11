@@ -852,9 +852,7 @@ def test_get_image_data_matches_full_slice_aics(
     reader = Reader(
         LOCAL_RESOURCES_DIR / filename, use_aicspylibczi=True
     )._implementation
-    expected = transforms.reshape_data(
-        reader.data, reader.dims.order, order, **kwargs
-    )
+    expected = transforms.reshape_data(reader.data, reader.dims.order, order, **kwargs)
     actual = reader.get_image_data(order, **kwargs)
     np.testing.assert_array_equal(actual, expected)
 
@@ -875,8 +873,6 @@ def test_get_image_data_reads_only_requested_planes_aics(
         calls["n"] += 1
         return real_plane(czi, scene, read_dims)
 
-    monkeypatch.setattr(
-        AicsPyLibCziReader, "_read_plane", staticmethod(counting_plane)
-    )
+    monkeypatch.setattr(AicsPyLibCziReader, "_read_plane", staticmethod(counting_plane))
     reader.get_image_data("ZYX", C=1)
     assert calls["n"] == 5

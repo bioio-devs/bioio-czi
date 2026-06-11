@@ -489,9 +489,7 @@ class Reader(BaseReader):
                     )
                     kept_lengths.append(len(idxs))
                 else:  # int -> fixed, axis dropped
-                    enumerated.append(
-                        (czi_char, [(None, begin + int(spec) % size_i)])
-                    )
+                    enumerated.append((czi_char, [(None, begin + int(spec) % size_i)]))
 
             out: Optional[np.ndarray] = None
             for combo in itertools.product(*(entries for _c, entries in enumerated)):
@@ -500,9 +498,7 @@ class Reader(BaseReader):
                     czi_char: idx
                     for (czi_char, _entries), (_p, idx) in zip(enumerated, combo)
                 }
-                plane, _ = Reader._read_plane(
-                    czi, self.current_scene_index, read_dims
-                )
+                plane, _ = Reader._read_plane(czi, self.current_scene_index, read_dims)
                 cropped = plane[plane_specs]
                 if out is None:
                     out = np.empty(
