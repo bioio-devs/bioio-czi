@@ -1,3 +1,4 @@
+import itertools
 import logging
 import xml.etree.ElementTree as ET
 from copy import copy
@@ -20,6 +21,7 @@ from bioio_base.dimensions import (
     Dimensions,
 )
 from bioio_base.reader import Reader as BaseReader
+from bioio_base.transforms import reshape_data
 from dask import delayed
 from fsspec.implementations.local import LocalFileSystem
 from fsspec.spec import AbstractFileSystem
@@ -39,6 +41,11 @@ log = logging.getLogger(__name__)
 CZI_SAMPLES_DIM_CHAR = "A"
 CZI_BLOCK_DIM_CHAR = "B"
 CZI_SCENE_DIM_CHAR = "S"
+
+# Mapped (public) dimension char <-> CZI-native char. They differ only for the
+# samples axis: CZI uses "A", the reader exposes it as DimensionNames.Samples.
+_CZI_CHAR = {DimensionNames.Samples: CZI_SAMPLES_DIM_CHAR}
+_MAPPED_CHAR = {CZI_SAMPLES_DIM_CHAR: DimensionNames.Samples}
 
 
 ###############################################################################
@@ -581,6 +588,158 @@ class Reader(BaseReader):
                 coords[dim_name] = Reader._generate_coord_array(0, dim_size, scale)
 
         return coords, px_sizes
+
+    def _read_region(
+        self, dimension_order_out: Optional[str] = None, **kwargs: Any
+    ) -> np.ndarray:
+        """
+        Read a hyper-rectangular region of the current scene directly from the
+        file, holding it open for the whole region.
+
+        Like the pylibczirw backend's region read, this opens the CZI once and
+        streams only the requested planes via ``CziFile.read_image`` -- avoiding
+        both the per-plane dask graph construction and the per-plane file reopen
+        that ``get_image_dask_data(...).compute()`` incurs. ``aicspylibczi`` has
+        no XY ROI, so XY sub-regions are cropped from full planes in numpy;
+        memory is still bounded to the requested region.
+
+        Dimensions omitted from ``dimension_order_out`` and not selected via
+        ``kwargs`` are pruned to index 0, matching ``reshape_data`` / the base
+        ``get_image_data`` behavior (used e.g. for mosaic ``M`` tiles).
+        """
+        native_order = self.mapped_dims
+        target_order = (
+            dimension_order_out if dimension_order_out is not None else native_order
+        )
+        frame_axes = {
+            DimensionNames.SpatialY,
+            DimensionNames.SpatialX,
+            DimensionNames.Samples,
+        }
+
+        with self._fs.open(self._path) as open_resource:
+            czi = CziFile(open_resource.f)
+            adjusted_scene = Reader._adjust_scene_index(
+                czi.get_dims_shape(),
+                self.current_scene_index,
+                czi.shape_is_consistent,
+            )
+            dims_shape = Reader._dims_shape_to_scene_dims_shape(
+                czi.get_dims_shape(),
+                self.current_scene_index,
+                czi.shape_is_consistent,
+            )
+            dims_shape.pop(CZI_BLOCK_DIM_CHAR, None)
+            # dims_shape values are (begin, end) per native (mapped) dimension.
+            begin = {d: dims_shape[_CZI_CHAR.get(d, d)][0] for d in native_order}
+            sizes = {
+                d: dims_shape[_CZI_CHAR.get(d, d)][1]
+                - dims_shape[_CZI_CHAR.get(d, d)][0]
+                for d in native_order
+            }
+
+            # Resolve each native dimension to a (start, stop) read window.
+            windows: Dict[str, Tuple[int, int]] = {}
+            for d in native_order:
+                if d in kwargs and isinstance(kwargs[d], slice):
+                    if kwargs[d].step not in (None, 1):
+                        raise ValueError(
+                            "read_region only supports contiguous slices; got step "
+                            f"{kwargs[d].step} for dimension {d!r}."
+                        )
+                    start, stop, _ = kwargs[d].indices(sizes[d])
+                    windows[d] = (start, stop)
+                elif d in kwargs:
+                    idx = int(kwargs[d]) % sizes[d]
+                    windows[d] = (idx, idx + 1)
+                elif d in target_order:
+                    windows[d] = (0, sizes[d])
+                else:
+                    # Pruned dimension (omitted, not selected): index 0.
+                    windows[d] = (0, 1)
+
+            pixel_type = PIXEL_DICT.get(czi.pixel_type)
+            if pixel_type is None:
+                raise TypeError(f"Pixel type: {czi.pixel_type} is not supported.")
+
+            out_shape = tuple(windows[d][1] - windows[d][0] for d in native_order)
+            region = np.empty(out_shape, dtype=pixel_type)
+
+            yx_window = {
+                DimensionNames.SpatialY: windows[DimensionNames.SpatialY],
+                DimensionNames.SpatialX: windows[DimensionNames.SpatialX],
+            }
+            loop_axes = [d for d in native_order if d not in frame_axes]
+            ranges = [range(*windows[d]) for d in loop_axes]
+            region_frame_order = [d for d in native_order if d in frame_axes]
+
+            for combo in itertools.product(*ranges):
+                read_dims = {CZI_SCENE_DIM_CHAR: adjusted_scene}
+                for i, d in enumerate(loop_axes):
+                    read_dims[_CZI_CHAR.get(d, d)] = begin[d] + combo[i]
+
+                data, data_dims = czi.read_image(**read_dims)
+
+                # Build a crop/squeeze index over data_dims, mapping native
+                # (mapped) axes back to CZI chars; YX cropped, others dropped.
+                ops: List[Union[int, slice]] = []
+                plane_order: List[str] = []
+                for char, _ in data_dims:
+                    mapped = _MAPPED_CHAR.get(char, char)
+                    if char in read_dims or char == CZI_BLOCK_DIM_CHAR:
+                        ops.append(0)
+                    elif mapped in yx_window:
+                        ops.append(slice(*yx_window[mapped]))
+                        plane_order.append(mapped)
+                    else:
+                        ops.append(slice(None))
+                        plane_order.append(mapped)
+                plane = data[tuple(ops)]
+
+                # Reorder plane frame axes to the region's frame-axis order.
+                if plane_order != region_frame_order:
+                    plane = np.transpose(
+                        plane, [plane_order.index(d) for d in region_frame_order]
+                    )
+
+                out_idx: List[Any] = [slice(None)] * len(native_order)
+                for i, d in enumerate(loop_axes):
+                    out_idx[native_order.index(d)] = combo[i] - windows[d][0]
+                region[tuple(out_idx)] = plane
+
+        if target_order == native_order:
+            return region
+        return reshape_data(
+            data=region, given_dims=native_order, return_dims=target_order
+        )
+
+    def get_image_data(
+        self, dimension_order_out: Optional[str] = None, **kwargs: Any
+    ) -> np.ndarray:
+        """
+        Read specific dimension image data as a numpy array.
+
+        When the selection is a hyper-rectangle -- every keyword is an ``int``
+        or a contiguous ``slice`` and at least one is a ``slice`` -- this reads
+        only the requested planes directly from a single held-open file via
+        :meth:`_read_region`, avoiding the per-plane dask graph and per-plane
+        file reopen that the base (whole-image) path incurs. All other
+        selections (lists, ranges, strided slices, or no keywords) defer to the
+        base implementation. See the base ``Reader.get_image_data`` for
+        parameter details.
+        """
+        routable = (
+            bool(kwargs)
+            and any(isinstance(v, slice) for v in kwargs.values())
+            and all(
+                isinstance(v, (int, np.integer))
+                or (isinstance(v, slice) and v.step in (None, 1))
+                for v in kwargs.values()
+            )
+        )
+        if routable:
+            return self._read_region(dimension_order_out, **kwargs)
+        return super().get_image_data(dimension_order_out, **kwargs)
 
     def _read_delayed(self) -> xr.DataArray:
         """

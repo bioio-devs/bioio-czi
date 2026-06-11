@@ -826,3 +826,47 @@ def test_czi_reader_stitch_tiles_clamps_bbox_mismatch() -> None:
 
     # The overlapping region should match the original tile data
     np.testing.assert_array_equal(stitched[:, 0:4, 0:5], tile_data)
+
+
+@pytest.mark.parametrize(
+    "order, selection",
+    [
+        ("TCZYX", {"T": slice(0, 1)}),  # mosaic M omitted -> pruned to tile 0
+        ("TCZYX", {"Z": slice(1, 3)}),
+        ("ZYX", {"T": 0, "C": 1}),
+        ("CYX", {"T": 1, "Z": 2, "Y": slice(10, 60), "X": slice(20, 90)}),
+        ("HTCZMYX", {"M": slice(0, 4), "Z": slice(1, 3)}),  # keep + slice M tiles
+        ("MYX", {"H": 0, "T": 1, "C": 1, "Z": 2}),  # mosaic tile as output axis
+    ],
+)
+def test_get_image_data_slicing_matches_base(order: str, selection: dict) -> None:
+    """
+    In aicspylibczi mode a hyper-rectangular get_image_data selection reads only
+    the requested region directly from a single held-open file, and must equal
+    what the base (whole-image-then-slice) implementation returns.
+    """
+    from bioio_base.reader import Reader as BaseReader
+
+    uri = LOCAL_RESOURCES_DIR / "S=2_4x2_T=2=Z=3_CH=2.czi"
+    reader = Reader(uri, use_aicspylibczi=True)
+    reader.set_scene(0)
+
+    actual = reader.get_image_data(order, **selection)
+    expected = BaseReader.get_image_data(reader._implementation, order, **selection)
+
+    assert actual.shape == expected.shape
+    np.testing.assert_array_equal(actual, expected)
+
+
+def test_get_image_data_non_slice_defers_to_base_aics() -> None:
+    """Non-hyper-rectangular selections (e.g. a list) still defer to base."""
+    from bioio_base.reader import Reader as BaseReader
+
+    uri = LOCAL_RESOURCES_DIR / "S=2_4x2_T=2=Z=3_CH=2.czi"
+    reader = Reader(uri, use_aicspylibczi=True)
+    reader.set_scene(0)
+
+    actual = reader.get_image_data("TCZYX", C=[0, 1])
+    expected = BaseReader.get_image_data(reader._implementation, "TCZYX", C=[0, 1])
+
+    np.testing.assert_array_equal(actual, expected)

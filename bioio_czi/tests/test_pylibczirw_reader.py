@@ -340,3 +340,65 @@ def test_ome_metadata_matches_exposed_shape_for_bounding_box_discrepant_czi() ->
     assert pixels.size_z == dim_to_size["Z"]
     assert pixels.size_y == dim_to_size["Y"]
     assert pixels.size_x == dim_to_size["X"]
+
+
+@pytest.mark.parametrize(
+    "filename, set_scene, order, selection",
+    [
+        # Multi-scene TCZYX: T/Z slices, XY sub-ROI, int squeeze, scene origin.
+        ("S=2_4x2_T=2=Z=3_CH=2.czi", "TR1", "TCZYX", {"T": slice(0, 1)}),
+        ("S=2_4x2_T=2=Z=3_CH=2.czi", "TR1", "TCZYX", {"Z": slice(1, 3)}),
+        (
+            "S=2_4x2_T=2=Z=3_CH=2.czi",
+            "TR1",
+            "TCZYX",
+            {"Y": slice(100, 300), "X": slice(50, 400)},
+        ),
+        ("S=2_4x2_T=2=Z=3_CH=2.czi", "TR1", "ZYX", {"T": 0, "C": 1}),
+        (
+            "S=2_4x2_T=2=Z=3_CH=2.czi",
+            "TR1",
+            "CYX",
+            {"T": 1, "Z": 2, "Y": slice(10, 60), "X": slice(20, 90)},
+        ),
+        # Scene 2 has a non-zero XY origin (1584, 851) in the file.
+        ("S=2_4x2_T=2=Z=3_CH=2.czi", "TR2", "TCZYX", {"Z": slice(0, 2)}),
+        # RGB image carries a trailing Samples axis.
+        ("RGB-8bit.czi", "Image:0", "YXS", {"X": slice(0, 50)}),
+    ],
+)
+def test_get_image_data_slicing_reads_region(
+    filename: str,
+    set_scene: str,
+    order: str,
+    selection: dict,
+) -> None:
+    """
+    get_image_data with a hyper-rectangular (int / contiguous-slice) selection
+    must return exactly what the dask path returns, while reading the region
+    directly from the file rather than materializing the whole image.
+    """
+    uri = LOCAL_RESOURCES_DIR / filename
+    reader = Reader(uri)
+    reader.set_scene(set_scene)
+
+    actual = reader.get_image_data(order, **selection)
+    expected = reader.get_image_dask_data(order, **selection).compute()
+
+    assert actual.shape == expected.shape
+    np.testing.assert_array_equal(actual, expected)
+
+
+def test_get_image_data_non_slice_defers_to_base() -> None:
+    """
+    Selections that are not expressible as a single hyper-rectangle (e.g. a list
+    of indices) must still return correct data via the base implementation.
+    """
+    uri = LOCAL_RESOURCES_DIR / "S=2_4x2_T=2=Z=3_CH=2.czi"
+    reader = Reader(uri)
+    reader.set_scene("TR1")
+
+    actual = reader.get_image_data("TCZYX", C=[0, 1])
+    expected = reader.get_image_dask_data("TCZYX", C=[0, 1]).compute()
+
+    np.testing.assert_array_equal(actual, expected)

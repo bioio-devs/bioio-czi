@@ -1,8 +1,9 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+import itertools
 import logging
-from typing import Any, Callable, ContextManager, Dict, Optional, Tuple, Union
+from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple, Union
 from xml.etree import ElementTree as ET
 
 import dask.array as da
@@ -15,6 +16,7 @@ from bioio_base.dimensions import (
     Dimensions,
 )
 from bioio_base.reader import Reader as BaseReader
+from bioio_base.transforms import reshape_data
 from bioio_base.types import PhysicalPixelSizes
 from dask import delayed
 from fsspec.spec import AbstractFileSystem
@@ -388,6 +390,174 @@ class Reader(BaseReader):
             The fully read data array.
         """
         return self._read_delayed().compute()
+
+    def _scene_dims_and_shape(self) -> Tuple[str, Tuple[int, ...]]:
+        """
+        Native dimension order and shape of the current scene, derived from the
+        bounding boxes alone -- i.e. without building the per-plane dask graph
+        that ``self.dims`` / ``self.shape`` would trigger via ``_read_delayed``.
+
+        Mirrors the dimension/shape bookkeeping in ``_read_delayed`` (including
+        the trailing ``Samples`` axis for BGR images); keep the two in sync.
+        """
+        dim_bounds = dict(self._total_bounding_box)
+        if len(self._scenes_bounding_rectangle) > 0:
+            rect = self._scenes_bounding_rectangle[self._get_czi_scene_index()]
+            dim_bounds[DimensionNames.SpatialX] = (rect.x, rect.x + rect.w)
+            dim_bounds[DimensionNames.SpatialY] = (rect.y, rect.y + rect.h)
+
+        coords = self._get_coords(
+            self.metadata, self._get_czi_scene_index(), dim_bounds
+        )
+        ordered_dims = [
+            d
+            for d in DEFAULT_DIMENSION_ORDER_LIST
+            if d in coords or size(self._total_bounding_box, d) > 1
+        ]
+        assert ordered_dims[-2:] == [
+            DimensionNames.SpatialY,
+            DimensionNames.SpatialX,
+        ]
+        shape = tuple(
+            len(coords[d]) if d in coords else size(self._total_bounding_box, d)
+            for d in ordered_dims
+        )
+        if "Bgr" in self._pixel_types[0]:
+            ordered_dims = ordered_dims + [DimensionNames.Samples]
+            shape = shape + (3,)
+        return "".join(ordered_dims), shape
+
+    def _read_region(
+        self,
+        dimension_order_out: Optional[str] = None,
+        **kwargs: Any,
+    ) -> np.ndarray:
+        """
+        Read a hyper-rectangular region of the current scene directly from the
+        file, holding it open for the whole region. This is the backbone of
+        :meth:`get_image_data` for sliced selections; it is not public API.
+
+        Unlike ``get_image_dask_data(...).compute()`` -- which builds a
+        per-plane dask graph and re-opens the file for every YX slice -- this
+        opens the CZI once and streams only the requested planes, cropping each
+        to the requested XY sub-region via a pylibCZIrw ROI. It never
+        materializes the full image, so partial reads are both faster and
+        memory-bounded.
+
+        Parameters
+        ----------
+        dimension_order_out: Optional[str]
+            Desired dimension order of the result. Default: the image's native
+            order. Dimensions selected by a scalar ``int`` and absent from this
+            order are dropped, matching ``get_image_data``.
+        kwargs: Any
+            Per-dimension selection. Each value is either an ``int`` (a single
+            index) or a contiguous ``slice`` (``step`` must be ``1`` or
+            ``None``). Unspecified dimensions are read in full. ``X``/``Y``
+            selections become the ROI; all other dimensions are iterated
+            plane-by-plane.
+
+        Returns
+        -------
+        np.ndarray
+            The region, in ``dimension_order_out``.
+        """
+        native_order, native_shape = self._scene_dims_and_shape()
+        dim_sizes = dict(zip(native_order, native_shape))
+        frame_axes = {
+            DimensionNames.SpatialY,
+            DimensionNames.SpatialX,
+            DimensionNames.Samples,
+        }
+
+        # Resolve each native dimension to a (start, stop) read window.
+        windows: Dict[str, Tuple[int, int]] = {}
+        for d in native_order:
+            if d not in kwargs:
+                windows[d] = (0, dim_sizes[d])
+            elif isinstance(kwargs[d], slice):
+                if kwargs[d].step not in (None, 1):
+                    raise ValueError(
+                        "read_region only supports contiguous slices; got step "
+                        f"{kwargs[d].step} for dimension {d!r}."
+                    )
+                start, stop, _ = kwargs[d].indices(dim_sizes[d])
+                windows[d] = (start, stop)
+            elif isinstance(kwargs[d], (int, np.integer)):
+                idx = int(kwargs[d]) % dim_sizes[d]
+                windows[d] = (idx, idx + 1)
+            else:
+                raise TypeError(
+                    f"read_region selection for {d!r} must be int or slice, got "
+                    f"{type(kwargs[d]).__name__}."
+                )
+
+        # XY origin: per-scene for scened files, total bounding box otherwise.
+        if len(self._scenes_bounding_rectangle) == 0:
+            scene: Optional[int] = None
+            base_x = self._total_bounding_box[DimensionNames.SpatialX][0]
+            base_y = self._total_bounding_box[DimensionNames.SpatialY][0]
+        else:
+            scene = self._get_czi_scene_index()
+            rect = self._scenes_bounding_rectangle[scene]
+            base_x, base_y = rect.x, rect.y
+
+        x0, x1 = windows[DimensionNames.SpatialX]
+        y0, y1 = windows[DimensionNames.SpatialY]
+        roi = (base_x + x0, base_y + y0, x1 - x0, y1 - y0)
+
+        out_shape = tuple(windows[d][1] - windows[d][0] for d in native_order)
+        region = np.empty(out_shape, dtype=PIXEL_DICT[self._pixel_types[0].lower()])
+        has_samples = DimensionNames.Samples in native_order
+
+        loop_axes = [d for d in native_order if d not in frame_axes]
+        ranges = [range(*windows[d]) for d in loop_axes]
+
+        with open(self._path) as file:
+            for combo in itertools.product(*ranges):
+                plane = {d: combo[i] for i, d in enumerate(loop_axes)}
+                raw = file.read(scene=scene, plane=plane, roi=roi)
+                # raw is (Y, X, 1) grayscale or (Y, X, 3) BGR.
+                result = raw if has_samples else raw[..., 0]
+                out_idx: List[Any] = [slice(None)] * len(native_order)
+                for i, d in enumerate(loop_axes):
+                    out_idx[native_order.index(d)] = combo[i] - windows[d][0]
+                region[tuple(out_idx)] = result
+
+        if dimension_order_out is None or dimension_order_out == native_order:
+            return region
+        return reshape_data(
+            data=region,
+            given_dims=native_order,
+            return_dims=dimension_order_out,
+        )
+
+    def get_image_data(
+        self, dimension_order_out: Optional[str] = None, **kwargs: Any
+    ) -> np.ndarray:
+        """
+        Read specific dimension image data as a numpy array.
+
+        When the selection is a hyper-rectangle -- every keyword is an ``int``
+        or a contiguous ``slice`` and at least one is a ``slice`` -- this reads
+        only the requested bytes directly from the file (holding it open for the
+        whole region) instead of materializing the whole image first. All other
+        selections (lists, ranges, strided slices, or no keywords) defer to the
+        base implementation. See the base ``Reader.get_image_data`` for
+        parameter details.
+        """
+        routable = (
+            bool(kwargs)
+            and any(isinstance(v, slice) for v in kwargs.values())
+            and all(
+                isinstance(v, (int, np.integer))
+                or (isinstance(v, slice) and v.step in (None, 1))
+                for v in kwargs.values()
+            )
+        )
+        if routable:
+            return self._read_region(dimension_order_out, **kwargs)
+        return super().get_image_data(dimension_order_out, **kwargs)
 
     def _get_stitched_dask_mosaic(self) -> xr.DataArray:
         """
