@@ -365,12 +365,11 @@ class Reader(BaseReader):
         dim_specs, new_dims = compute_dim_specs(
             native_shape, native_order, dimension_order_out, **kwargs
         )
-        indexed = self._read_indexed(native_order, dim_specs)
-        # finalize_dims is typed ArrayLike; indexed is a numpy array, so the
-        # result is too.
+        region = self._read_region(native_order, native_shape, dim_specs)
+        # finalize_dims is typed ArrayLike; region is a numpy array, so is this.
         return cast(
             np.ndarray,
-            finalize_dims(indexed, new_dims, native_order, dimension_order_out),
+            finalize_dims(region, new_dims, native_order, dimension_order_out),
         )
 
     @staticmethod
@@ -411,24 +410,23 @@ class Reader(BaseReader):
             f"{type(spec).__name__}."
         )
 
-    def _read_indexed(self, given_dims: str, dim_specs: list) -> np.ndarray:
+    def _read_region(
+        self, given_dims: str, native_shape: Tuple[int, ...], dim_specs: list
+    ) -> np.ndarray:
         """
-        Read only the requested sub-region for ``get_image_data``.
+        Read the sub-region described by ``dim_specs`` directly from the file.
 
         Cullable dims (everything before Y: T/C/Z/M/...) are read one plane at a
         time. The Y/X selection is translated into a single pylibCZIrw ROI so
         only the requested rectangle is read off disk (lists / strided slices are
         honored via an in-window residual index). Samples (BGR) is not a file
-        axis, so it is cropped in memory. The result matches
-        ``self.data[tuple(dim_specs)]`` — integer specs drop their axis.
+        axis, so it is cropped in memory. Integer specs drop their axis, so the
+        result is in the post-getitem dim order (``finalize_dims`` then reorders
+        to the requested output order).
         """
         y_index = given_dims.index(DimensionNames.SpatialY)
         cullable_dims = given_dims[:y_index]  # e.g. "TCZ"
         has_samples = DimensionNames.Samples in given_dims
-
-        # Resolve sizes from the bounding boxes (cheap) rather than self.shape,
-        # which would build the whole-image dask graph via _read_delayed.
-        _, native_shape = self._scene_dims_and_shape()
 
         # Translate the Y/X selections into one on-disk ROI plus a residual
         # in-window index, so we read only the requested rectangle (not the whole

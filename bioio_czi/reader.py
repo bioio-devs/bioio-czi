@@ -197,10 +197,10 @@ class Reader(BaseReader):
         """
         Read specific dimension image data as a numpy array.
 
-        Delegates to the active backend so its sub-region read path (the
-        overridden ``_read_indexed``) is actually reached. Without this, the
-        base ``get_image_data`` would run on this wrapper and fall back to
-        materializing the whole image before slicing.
+        Delegates to the active backend so its sub-region read path
+        (``get_image_data`` / ``_read_region``) is actually reached. Without
+        this, the base ``get_image_data`` would run on this wrapper and fall
+        back to materializing the whole image before slicing.
         """
         return self._implementation.get_image_data(dimension_order_out, **kwargs)
 

@@ -487,25 +487,24 @@ class Reader(BaseReader):
         dim_specs, new_dims = compute_dim_specs(
             native_shape, native_order, dimension_order_out, **kwargs
         )
-        indexed = self._read_indexed(native_order, dim_specs)
-        # finalize_dims is typed ArrayLike; indexed is a numpy array, so is this.
+        region = self._read_region(native_order, native_shape, dim_specs)
+        # finalize_dims is typed ArrayLike; region is a numpy array, so is this.
         return cast(
             np.ndarray,
-            finalize_dims(indexed, new_dims, native_order, dimension_order_out),
+            finalize_dims(region, new_dims, native_order, dimension_order_out),
         )
 
-    def _read_indexed(self, given_dims: str, dim_specs: list) -> np.ndarray:
+    def _read_region(
+        self, given_dims: str, native_shape: Tuple[int, ...], dim_specs: list
+    ) -> np.ndarray:
         """
-        Read only the requested non-spatial planes for ``get_image_data``.
+        Read the sub-region described by ``dim_specs`` directly from the file.
 
         Cullable dims (everything except Y, X, Samples) are read one plane at a
         time via ``read_image``, which reads only the requested sub-blocks at the
         libCZI level. Spatial dims (Y, X, Samples) are read in full and cropped in
-        memory via ``plane_specs``. The result matches
-        ``self.data[tuple(dim_specs)]`` — integer specs drop their axis.
-
-        Sizes come from ``get_dims_shape()`` (not ``self.shape``) so this never
-        builds the whole-image dask graph.
+        memory via ``plane_specs``. Integer specs drop their axis, so the result
+        is in the post-getitem dim order (``finalize_dims`` then reorders it).
         """
         spatial = (
             DimensionNames.SpatialY,
@@ -535,7 +534,7 @@ class Reader(BaseReader):
             for i, d in cullable:
                 czi_char = _BIOIO_TO_CZI_DIM.get(d, d)
                 begin = dims_shape[czi_char][0]
-                size_i = dims_shape[czi_char][1]
+                size_i = native_shape[i]
                 spec = dim_specs[i]
                 if isinstance(spec, slice):
                     idxs = list(range(*spec.indices(size_i)))
