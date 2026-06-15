@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, List, Optional, Tuple, Union
 from xml.etree import ElementTree
 
+import numpy as np
 import xarray as xr
 from bioio_base.dimensions import Dimensions
 from bioio_base.exceptions import UnsupportedFileFormatError
@@ -189,6 +190,19 @@ class Reader(BaseReader):
     @property
     def current_scene_index(self) -> int:
         return self._implementation.current_scene_index
+
+    def get_image_data(
+        self, dimension_order_out: Optional[str] = None, **kwargs: Any
+    ) -> np.ndarray:
+        """
+        Read specific dimension image data as a numpy array.
+
+        Delegates to the active backend so its sub-region read path (the
+        overridden ``_read_indexed``) is actually reached. Without this, the
+        base ``get_image_data`` would run on this wrapper and fall back to
+        materializing the whole image before slicing.
+        """
+        return self._implementation.get_image_data(dimension_order_out, **kwargs)
 
     def _read_delayed(self) -> xr.DataArray:
         """
