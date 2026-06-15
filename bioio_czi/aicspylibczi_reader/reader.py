@@ -4,7 +4,7 @@ import xml.etree.ElementTree as ET
 from copy import copy
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, Hashable, List, Optional, Tuple, Union
+from typing import Any, Dict, Hashable, List, Optional, Tuple, Union, cast
 
 import dask.array as da
 import numpy as np
@@ -21,6 +21,7 @@ from bioio_base.dimensions import (
     Dimensions,
 )
 from bioio_base.reader import Reader as BaseReader
+from bioio_base.transforms import compute_dim_specs, finalize_dims
 from dask import delayed
 from fsspec.implementations.local import LocalFileSystem
 from fsspec.spec import AbstractFileSystem
@@ -439,6 +440,60 @@ class Reader(BaseReader):
         # Convert ops and run getitem
         return data[tuple(ops)], real_dims
 
+    def _scene_dims_and_shape(self) -> Tuple[str, Tuple[int, ...]]:
+        """
+        Native dimension order and shape of the current scene, derived from
+        ``get_dims_shape()`` alone -- i.e. without building the per-plane dask
+        graph that ``self.dims`` / ``self.shape`` would trigger via
+        ``_read_delayed`` / ``_create_dask_array``.
+
+        This keeps a sub-region read cheap: a fresh reader (e.g. one per shard in
+        a parallel conversion) resolves order/shape without materializing the
+        whole-image lazy graph. Mirrors the sizing in ``_create_dask_array``
+        (which uses ``dims_shape[char][1]`` per dim); keep the two in sync.
+        """
+        order = self.mapped_dims
+        with self._fs.open(self._path) as open_resource:
+            czi = CziFile(open_resource.f)
+            dims_shape = Reader._dims_shape_to_scene_dims_shape(
+                czi.get_dims_shape(),
+                self.current_scene_index,
+                czi.shape_is_consistent,
+            )
+        dims_shape.pop(CZI_BLOCK_DIM_CHAR, None)
+        shape = tuple(dims_shape[_BIOIO_TO_CZI_DIM.get(d, d)][1] for d in order)
+        return order, shape
+
+    def get_image_data(
+        self, dimension_order_out: Optional[str] = None, **kwargs: Any
+    ) -> np.ndarray:
+        """
+        Read specific dimension image data as a numpy array.
+
+        Reads only the requested planes directly from the file. The native
+        order/shape are resolved via :meth:`_scene_dims_and_shape`, so -- unlike
+        the base implementation -- this never triggers ``_read_delayed`` (the
+        whole-image dask graph), which is both slow and memory-heavy when a fresh
+        reader is created per read (e.g. per shard across parallel conversion
+        workers).
+
+        ``dimension_order_out=None`` keeps the base behavior (returns the full
+        ``self.data``). See the base ``Reader.get_image_data`` for parameter
+        details.
+        """
+        if dimension_order_out is None:
+            return super().get_image_data(None, **kwargs)
+        native_order, native_shape = self._scene_dims_and_shape()
+        dim_specs, new_dims = compute_dim_specs(
+            native_shape, native_order, dimension_order_out, **kwargs
+        )
+        indexed = self._read_indexed(native_order, dim_specs)
+        # finalize_dims is typed ArrayLike; indexed is a numpy array, so is this.
+        return cast(
+            np.ndarray,
+            finalize_dims(indexed, new_dims, native_order, dimension_order_out),
+        )
+
     def _read_indexed(self, given_dims: str, dim_specs: list) -> np.ndarray:
         """
         Read only the requested non-spatial planes for ``get_image_data``.
@@ -448,6 +503,9 @@ class Reader(BaseReader):
         libCZI level. Spatial dims (Y, X, Samples) are read in full and cropped in
         memory via ``plane_specs``. The result matches
         ``self.data[tuple(dim_specs)]`` — integer specs drop their axis.
+
+        Sizes come from ``get_dims_shape()`` (not ``self.shape``) so this never
+        builds the whole-image dask graph.
         """
         spatial = (
             DimensionNames.SpatialY,
@@ -466,6 +524,9 @@ class Reader(BaseReader):
                 self.current_scene_index,
                 czi.shape_is_consistent,
             )
+            pixel_type = PIXEL_DICT.get(czi.pixel_type)
+            if pixel_type is None:
+                raise TypeError(f"Pixel type: {czi.pixel_type} is not supported.")
 
             # Resolve each cullable dim to (czi_char, [(out_pos|None, abs_idx)...]).
             # read_image wants absolute CZI indices: begin + position.
@@ -474,7 +535,7 @@ class Reader(BaseReader):
             for i, d in cullable:
                 czi_char = _BIOIO_TO_CZI_DIM.get(d, d)
                 begin = dims_shape[czi_char][0]
-                size_i = self.shape[i]
+                size_i = dims_shape[czi_char][1]
                 spec = dim_specs[i]
                 if isinstance(spec, slice):
                     idxs = list(range(*spec.indices(size_i)))
@@ -508,7 +569,8 @@ class Reader(BaseReader):
 
         if out is None:
             # Empty selection along a kept dim; build a correctly-shaped empty.
-            out = np.empty(tuple(kept_lengths), dtype=self.dtype)
+            # Use the pixel dtype directly (self.dtype would build the graph).
+            out = np.empty(tuple(kept_lengths), dtype=pixel_type)
         return out
 
     def _create_dask_array(self, czi: CziFile) -> xr.DataArray:
