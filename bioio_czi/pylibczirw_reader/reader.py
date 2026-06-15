@@ -292,18 +292,83 @@ class Reader(BaseReader):
         czi_scene_index = self._get_czi_scene_index()
         return czi_scene_index, self._scenes_bounding_rectangle[czi_scene_index]
 
+    @staticmethod
+    def _spatial_window(
+        spec: Union[int, slice, list], size: int
+    ) -> Tuple[int, int, Any]:
+        """
+        Translate a single spatial (Y or X) getitem spec into an on-disk read
+        window plus a residual in-window index.
+
+        Returns ``(start, extent, residual)`` where ``[start, start + extent)``
+        is the contiguous range to read from the file (the pylibCZIrw ROI) and
+        ``residual`` is the index to apply to that read window so the result
+        matches ``full_plane[spec]`` exactly. This lets us read only the
+        requested rectangle off disk while still honoring lists / strided slices
+        (which are not expressible as a single ROI) via the residual.
+
+        - int ``k``      -> ``(k, 1, 0)``                  (axis dropped)
+        - contiguous slice -> ``(start, stop - start, slice(None))``
+        - strided slice  -> bounding range + ``slice(0, extent, step)``
+        - list of indices -> bounding range + ``[j - lo for j in idxs]``
+        """
+        if isinstance(spec, (int, np.integer)):
+            k = int(spec) % size
+            return k, 1, 0
+        if isinstance(spec, slice):
+            start, stop, step = spec.indices(size)
+            extent = max(stop - start, 0)
+            if step == 1:
+                return start, extent, slice(None)
+            return start, extent, slice(0, extent, step)
+        if isinstance(spec, list):
+            idxs = [j % size for j in spec]
+            lo, hi = min(idxs), max(idxs)
+            return lo, hi - lo + 1, [j - lo for j in idxs]
+        raise TypeError(
+            f"Spatial selection must be int, slice, or list, got "
+            f"{type(spec).__name__}."
+        )
+
     def _read_indexed(self, given_dims: str, dim_specs: list) -> np.ndarray:
         """
-        Read only the requested non-spatial planes for ``get_image_data``.
+        Read only the requested sub-region for ``get_image_data``.
 
         Cullable dims (everything before Y: T/C/Z/M/...) are read one plane at a
-        time; spatial dims (Y, X, and Samples for BGR) are read whole-plane and
-        cropped in memory via ``plane_specs``. The result matches
+        time. The Y/X selection is translated into a single pylibCZIrw ROI so
+        only the requested rectangle is read off disk (lists / strided slices are
+        honored via an in-window residual index). Samples (BGR) is not a file
+        axis, so it is cropped in memory. The result matches
         ``self.data[tuple(dim_specs)]`` — integer specs drop their axis.
         """
         y_index = given_dims.index(DimensionNames.SpatialY)
         cullable_dims = given_dims[:y_index]  # e.g. "TCZ"
-        plane_specs = tuple(dim_specs[y_index:])  # Y, X, and Samples (BGR)
+        has_samples = DimensionNames.Samples in given_dims
+
+        # Translate the Y/X selections into one on-disk ROI plus a residual
+        # in-window index, so we read only the requested rectangle (not the whole
+        # plane). Samples (BGR) is cropped in memory.
+        y_start, y_extent, y_residual = self._spatial_window(
+            dim_specs[y_index], self.shape[y_index]
+        )
+        x_start, x_extent, x_residual = self._spatial_window(
+            dim_specs[y_index + 1], self.shape[y_index + 1]
+        )
+        window_specs: List[Any] = [y_residual, x_residual]
+        if has_samples:
+            window_specs.append(dim_specs[y_index + 2])  # Samples spec
+        window_specs_t = tuple(window_specs)
+
+        # XY origin: per-scene for scened files, total bounding box otherwise.
+        if len(self._scenes_bounding_rectangle) == 0:
+            scene: Optional[int] = None
+            base_x = self._total_bounding_box[DimensionNames.SpatialX][0]
+            base_y = self._total_bounding_box[DimensionNames.SpatialY][0]
+        else:
+            scene = self._get_czi_scene_index()
+            rect = self._scenes_bounding_rectangle[scene]
+            base_x, base_y = rect.x, rect.y
+        roi = (base_x + x_start, base_y + y_start, x_extent, y_extent)
 
         # Resolve each cullable dim to (out_pos | None, plane_index) tuples.
         # out_pos is None for fixed (integer) dims whose axis is dropped.
@@ -324,14 +389,17 @@ class Reader(BaseReader):
             if not isinstance(spec, (int, np.integer))
         ]
 
-        scene, roi = self._current_scene_roi()
         out: Optional[np.ndarray] = None
         with open(self._path) as file:
             for combo in itertools.product(*enumerated):
                 out_pos = tuple(pos for pos, _idx in combo if pos is not None)
                 plane = {d: idx for (d, (_pos, idx)) in zip(cullable_dims, combo)}
-                result = np.squeeze(file.read(scene=scene, plane=plane, roi=roi))
-                cropped = result[plane_specs]
+                raw = file.read(scene=scene, plane=plane, roi=roi)
+                # raw is (Y, X, 1) grayscale or (Y, X, 3) BGR. Drop the trailing
+                # samples axis for grayscale (not np.squeeze, which would also
+                # collapse a length-1 Y or X window).
+                result = raw if has_samples else raw[..., 0]
+                cropped = result[window_specs_t]
                 if out is None:
                     out = np.empty(
                         tuple(kept_lengths) + cropped.shape, dtype=cropped.dtype
