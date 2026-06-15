@@ -3,7 +3,17 @@
 
 import itertools
 import logging
-from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    ContextManager,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    Union,
+    cast,
+)
 from xml.etree import ElementTree as ET
 
 import dask.array as da
@@ -16,6 +26,7 @@ from bioio_base.dimensions import (
     Dimensions,
 )
 from bioio_base.reader import Reader as BaseReader
+from bioio_base.transforms import compute_dim_specs, finalize_dims
 from bioio_base.types import PhysicalPixelSizes
 from dask import delayed
 from fsspec.spec import AbstractFileSystem
@@ -292,6 +303,76 @@ class Reader(BaseReader):
         czi_scene_index = self._get_czi_scene_index()
         return czi_scene_index, self._scenes_bounding_rectangle[czi_scene_index]
 
+    def _scene_dims_and_shape(self) -> Tuple[str, Tuple[int, ...]]:
+        """
+        Native dimension order and shape of the current scene, derived from the
+        bounding boxes alone -- i.e. without building the per-plane dask graph
+        that ``self.dims`` / ``self.shape`` would trigger via ``_read_delayed``.
+
+        This is what keeps a sub-region read cheap: a fresh reader (e.g. one per
+        shard in a parallel conversion) can resolve order/shape without
+        materializing the whole-image lazy graph. Mirrors the dimension/shape
+        bookkeeping in ``_read_delayed`` (including the trailing ``Samples`` axis
+        for BGR images); keep the two in sync.
+        """
+        dim_bounds = dict(self._total_bounding_box)
+        if len(self._scenes_bounding_rectangle) > 0:
+            rect = self._scenes_bounding_rectangle[self._get_czi_scene_index()]
+            dim_bounds[DimensionNames.SpatialX] = (rect.x, rect.x + rect.w)
+            dim_bounds[DimensionNames.SpatialY] = (rect.y, rect.y + rect.h)
+
+        coords = self._get_coords(
+            self.metadata, self._get_czi_scene_index(), dim_bounds
+        )
+        ordered_dims = [
+            d
+            for d in DEFAULT_DIMENSION_ORDER_LIST
+            if d in coords or size(self._total_bounding_box, d) > 1
+        ]
+        assert ordered_dims[-2:] == [
+            DimensionNames.SpatialY,
+            DimensionNames.SpatialX,
+        ]
+        shape = tuple(
+            len(coords[d]) if d in coords else size(self._total_bounding_box, d)
+            for d in ordered_dims
+        )
+        if "Bgr" in self._pixel_types[0]:
+            ordered_dims = ordered_dims + [DimensionNames.Samples]
+            shape = shape + (3,)
+        return "".join(ordered_dims), shape
+
+    def get_image_data(
+        self, dimension_order_out: Optional[str] = None, **kwargs: Any
+    ) -> np.ndarray:
+        """
+        Read specific dimension image data as a numpy array.
+
+        Reads only the requested sub-region directly from the file. The native
+        order/shape are resolved from the bounding boxes via
+        :meth:`_scene_dims_and_shape`, so -- unlike the base implementation --
+        this never triggers ``_read_delayed`` (the whole-image dask graph). That
+        graph build is both slow and memory-heavy when a fresh reader is created
+        per read (e.g. per shard across parallel conversion workers).
+
+        ``dimension_order_out=None`` keeps the base behavior (returns the full
+        ``self.data``). See the base ``Reader.get_image_data`` for parameter
+        details.
+        """
+        if dimension_order_out is None:
+            return super().get_image_data(None, **kwargs)
+        native_order, native_shape = self._scene_dims_and_shape()
+        dim_specs, new_dims = compute_dim_specs(
+            native_shape, native_order, dimension_order_out, **kwargs
+        )
+        indexed = self._read_indexed(native_order, dim_specs)
+        # finalize_dims is typed ArrayLike; indexed is a numpy array, so the
+        # result is too.
+        return cast(
+            np.ndarray,
+            finalize_dims(indexed, new_dims, native_order, dimension_order_out),
+        )
+
     @staticmethod
     def _spatial_window(
         spec: Union[int, slice, list], size: int
@@ -345,14 +426,18 @@ class Reader(BaseReader):
         cullable_dims = given_dims[:y_index]  # e.g. "TCZ"
         has_samples = DimensionNames.Samples in given_dims
 
+        # Resolve sizes from the bounding boxes (cheap) rather than self.shape,
+        # which would build the whole-image dask graph via _read_delayed.
+        _, native_shape = self._scene_dims_and_shape()
+
         # Translate the Y/X selections into one on-disk ROI plus a residual
         # in-window index, so we read only the requested rectangle (not the whole
         # plane). Samples (BGR) is cropped in memory.
         y_start, y_extent, y_residual = self._spatial_window(
-            dim_specs[y_index], self.shape[y_index]
+            dim_specs[y_index], native_shape[y_index]
         )
         x_start, x_extent, x_residual = self._spatial_window(
-            dim_specs[y_index + 1], self.shape[y_index + 1]
+            dim_specs[y_index + 1], native_shape[y_index + 1]
         )
         window_specs: List[Any] = [y_residual, x_residual]
         if has_samples:
@@ -375,7 +460,7 @@ class Reader(BaseReader):
         enumerated: List[list] = []
         for i, _dim in enumerate(cullable_dims):
             spec = dim_specs[i]
-            size_i = self.shape[i]
+            size_i = native_shape[i]
             if isinstance(spec, slice):
                 enumerated.append(list(enumerate(range(*spec.indices(size_i)))))
             elif isinstance(spec, list):
@@ -408,7 +493,10 @@ class Reader(BaseReader):
 
         if out is None:
             # Empty selection along a kept dim; build a correctly-shaped empty.
-            out = np.empty(tuple(kept_lengths), dtype=self.dtype)
+            # Use the pixel dtype directly (self.dtype would build the graph).
+            out = np.empty(
+                tuple(kept_lengths), dtype=PIXEL_DICT[self._pixel_types[0].lower()]
+            )
         return out
 
     def _read_delayed(self) -> xr.DataArray:
