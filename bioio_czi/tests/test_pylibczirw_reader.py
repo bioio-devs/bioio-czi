@@ -340,3 +340,31 @@ def test_ome_metadata_matches_exposed_shape_for_bounding_box_discrepant_czi() ->
     assert pixels.size_z == dim_to_size["Z"]
     assert pixels.size_y == dim_to_size["Y"]
     assert pixels.size_x == dim_to_size["X"]
+
+
+@pytest.mark.parametrize(
+    "filename, order, kwargs",
+    [
+        # Empty selection along a cullable (non-spatial) dim leaves the read loop
+        # with nothing to iterate, exercising the empty-result fallback in
+        # _read_region. The result must keep its full spatial dimensionality.
+        ("s_3_t_1_c_3_z_5.czi", "CZYX", {"C": slice(0, 0)}),
+        ("s_3_t_1_c_3_z_5.czi", "CZYX", {"Z": slice(0, 0), "C": 1}),
+        # BGR (has a Samples axis) empty selection.
+        ("RGB-8bit-with-non-xy-dims.czi", "ZYXS", {"Z": slice(0, 0)}),
+    ],
+)
+def test_get_image_data_empty_selection_matches_full_slice(
+    filename: str, order: str, kwargs: dict
+) -> None:
+    from bioio_base import transforms
+
+    reader = Reader(LOCAL_RESOURCES_DIR / filename)._implementation
+    expected = transforms.reshape_data(reader.data, reader.dims.order, order, **kwargs)
+    actual = reader.get_image_data(order, **kwargs)
+
+    # An empty selection yields a zero-element array that still carries every
+    # requested axis (one of them with length 0), matching the base path.
+    assert 0 in actual.shape
+    assert actual.shape == expected.shape
+    np.testing.assert_array_equal(actual, expected)
