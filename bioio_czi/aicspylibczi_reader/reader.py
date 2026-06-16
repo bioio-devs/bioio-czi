@@ -515,13 +515,13 @@ class Reader(BaseReader):
         native_shape: Optional[Tuple[int, ...]] = None,
     ) -> np.ndarray:
         """
-        Read the sub-region described by ``dim_specs`` directly from the file.
+        Read only the requested non-spatial planes for ``get_image_data``.
 
         Cullable dims (everything except Y, X, Samples) are read one plane at a
         time via ``read_image``, which reads only the requested sub-blocks at the
         libCZI level. Spatial dims (Y, X, Samples) are read in full and cropped in
-        memory via ``plane_specs``. Integer specs drop their axis, so the result
-        is in the post-getitem dim order (``finalize_dims`` then reorders it).
+        memory via ``plane_specs``. The result matches
+        ``self.data[tuple(dim_specs)]`` — integer specs drop their axis.
 
         ``native_shape`` is the current scene's native shape; when omitted it is
         derived via :meth:`_derive_native_scene_shape` (still graph-free), so the
