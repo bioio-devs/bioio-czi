@@ -440,17 +440,31 @@ class Reader(BaseReader):
         # Convert ops and run getitem
         return data[tuple(ops)], real_dims
 
-    def _scene_dims_and_shape(self) -> Tuple[str, Tuple[int, ...]]:
+    def _derive_native_scene_shape(self) -> Tuple[str, Tuple[int, ...]]:
         """
-        Native dimension order and shape of the current scene, derived from
-        ``get_dims_shape()`` alone -- i.e. without building the per-plane dask
-        graph that ``self.dims`` / ``self.shape`` would trigger via
-        ``_read_delayed`` / ``_create_dask_array``.
+        Resolve the native dimension order and shape of the current scene from
+        ``CziFile.get_dims_shape()``, without building the per-plane dask graph
+        that ``self.dims`` / ``self.shape`` would trigger via ``_read_delayed`` /
+        ``_create_dask_array``.
 
         This keeps a sub-region read cheap: a fresh reader (e.g. one per shard in
-        a parallel conversion) resolves order/shape without materializing the
-        whole-image lazy graph. Mirrors the sizing in ``_create_dask_array``
-        (which uses ``dims_shape[char][1]`` per dim); keep the two in sync.
+        a parallel conversion) resolves order/shape from the per-scene dim sizes
+        instead of materializing the whole-image lazy graph.
+
+        Takes no arguments; operates on the current scene
+        (``self.current_scene_index``).
+
+        Returns
+        -------
+        order : str
+            The native dimension order (``self.mapped_dims``), e.g. ``"TCZYX"``.
+        shape : Tuple[int, ...]
+            The size of each dimension in ``order`` for the current scene.
+
+        Notes
+        -----
+        Mirrors the sizing in ``_create_dask_array`` (which uses
+        ``dims_shape[char][1]`` per dim); keep the two in sync.
         """
         order = self.mapped_dims
         with self._fs.open(self._path) as open_resource:
@@ -471,7 +485,7 @@ class Reader(BaseReader):
         Read specific dimension image data as a numpy array.
 
         Reads only the requested planes directly from the file. The native
-        order/shape are resolved via :meth:`_scene_dims_and_shape`, so -- unlike
+        order/shape are resolved via :meth:`_derive_native_scene_shape`, so -- unlike
         the base implementation -- this never triggers ``_read_delayed`` (the
         whole-image dask graph), which is both slow and memory-heavy when a fresh
         reader is created per read (e.g. per shard across parallel conversion
@@ -483,7 +497,7 @@ class Reader(BaseReader):
         """
         if dimension_order_out is None:
             return super().get_image_data(None, **kwargs)
-        native_order, native_shape = self._scene_dims_and_shape()
+        native_order, native_shape = self._derive_native_scene_shape()
         dim_specs, new_dims = compute_dim_specs(
             native_shape, native_order, dimension_order_out, **kwargs
         )

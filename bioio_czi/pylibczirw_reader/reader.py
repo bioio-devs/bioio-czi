@@ -263,7 +263,11 @@ class Reader(BaseReader):
         """
 
         # Freeze the scene / ROI for lazy builder invocation.
-        current_scene, current_roi = self._current_scene_roi()
+        if len(self._scenes_bounding_rectangle) == 0:
+            current_scene, current_roi = None, None
+        else:
+            current_scene = self._get_czi_scene_index()
+            current_roi = self._scenes_bounding_rectangle[current_scene]
 
         def array_builder(indices: tuple[int]) -> int:
             assert len(indices) >= len(
@@ -279,41 +283,34 @@ class Reader(BaseReader):
 
         return array_builder
 
-    def _current_scene_roi(self) -> Tuple[Optional[int], Any]:
+    def _derive_native_scene_shape(self) -> Tuple[str, Tuple[int, ...]]:
         """
-        Resolve the ``(czi_scene_index, highest-resolution ROI)`` for the current
-        scene, for use with ``file.read(scene=, roi=)``.
-
-        ROI stands for Region Of Interest. In pylibczi's read method, the default
-        ROI is the bounding rectangle of the scene **across all zoom levels**. We
-        read just the highest resolution level (zoom = 1), which is smaller than
-        the default ROI in some cases. For example, scene 0 of the test file
-        S=2_4x2_T=2=Z=3_CH=2.czi is 947x487 at the highest resolution, but 948x488
-        when all zoom levels are considered. (At zoom 0.5 the result is
-        ceiling(947/2) x ceiling(487/2).) See also file.scenes_bounding_rectangle
-        vs. file.scenes_bounding_rectangle_no_pyramid.
-
-        NOTE: self._current_scene_index is a BioIO scene index (0..N-1); it is
-        mapped to the underlying CZI scene index before use with pylibczirw or
-        _scenes_bounding_rectangle.
-        """
-        # Some files have no scenes but can still be read if scene is not specified.
-        if len(self._scenes_bounding_rectangle) == 0:
-            return None, None
-        czi_scene_index = self._get_czi_scene_index()
-        return czi_scene_index, self._scenes_bounding_rectangle[czi_scene_index]
-
-    def _scene_dims_and_shape(self) -> Tuple[str, Tuple[int, ...]]:
-        """
-        Native dimension order and shape of the current scene, derived from the
-        bounding boxes alone -- i.e. without building the per-plane dask graph
+        Resolve the native dimension order and shape of the current scene from
+        the CZI bounding-box metadata, without building the per-plane dask graph
         that ``self.dims`` / ``self.shape`` would trigger via ``_read_delayed``.
 
         This is what keeps a sub-region read cheap: a fresh reader (e.g. one per
-        shard in a parallel conversion) can resolve order/shape without
-        materializing the whole-image lazy graph. Mirrors the dimension/shape
-        bookkeeping in ``_read_delayed`` (including the trailing ``Samples`` axis
-        for BGR images); keep the two in sync.
+        shard in a parallel conversion) can resolve order/shape from the already
+        loaded ``_total_bounding_box`` / ``_scenes_bounding_rectangle`` instead of
+        materializing the whole-image lazy graph.
+
+        Takes no arguments; operates on the current scene
+        (``self._current_scene_index``).
+
+        Returns
+        -------
+        order : str
+            The native dimension order, e.g. ``"TCZYX"`` (with a trailing ``"S"``
+            Samples axis appended for BGR images). The last two axes are always
+            ``YX``.
+        shape : Tuple[int, ...]
+            The size of each dimension in ``order``, with Y/X cropped to the
+            current scene's bounding rectangle.
+
+        Notes
+        -----
+        Mirrors the dimension/shape bookkeeping in ``_read_delayed`` (including
+        the trailing ``Samples`` axis for BGR images); keep the two in sync.
         """
         dim_bounds = dict(self._total_bounding_box)
         if len(self._scenes_bounding_rectangle) > 0:
@@ -350,7 +347,7 @@ class Reader(BaseReader):
 
         Reads only the requested sub-region directly from the file. The native
         order/shape are resolved from the bounding boxes via
-        :meth:`_scene_dims_and_shape`, so -- unlike the base implementation --
+        :meth:`_derive_native_scene_shape`, so -- unlike the base implementation --
         this never triggers ``_read_delayed`` (the whole-image dask graph). That
         graph build is both slow and memory-heavy when a fresh reader is created
         per read (e.g. per shard across parallel conversion workers).
@@ -361,7 +358,7 @@ class Reader(BaseReader):
         """
         if dimension_order_out is None:
             return super().get_image_data(None, **kwargs)
-        native_order, native_shape = self._scene_dims_and_shape()
+        native_order, native_shape = self._derive_native_scene_shape()
         dim_specs, new_dims = compute_dim_specs(
             native_shape, native_order, dimension_order_out, **kwargs
         )
