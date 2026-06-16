@@ -198,7 +198,7 @@ class Reader(BaseReader):
         Read specific dimension image data as a numpy array.
 
         Delegates to the active backend so its sub-region read path
-        (``get_image_data`` / ``_read_region``) is actually reached.
+        (``get_image_data`` / ``_read_indexed``) is actually reached.
         """
         return self._implementation.get_image_data(dimension_order_out, **kwargs)
 

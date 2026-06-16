@@ -501,15 +501,18 @@ class Reader(BaseReader):
         dim_specs, new_dims = compute_dim_specs(
             native_shape, native_order, dimension_order_out, **kwargs
         )
-        region = self._read_region(native_order, native_shape, dim_specs)
+        region = self._read_indexed(native_order, dim_specs, native_shape)
         # finalize_dims is typed ArrayLike; region is a numpy array, so is this.
         return cast(
             np.ndarray,
             finalize_dims(region, new_dims, native_order, dimension_order_out),
         )
 
-    def _read_region(
-        self, given_dims: str, native_shape: Tuple[int, ...], dim_specs: list
+    def _read_indexed(
+        self,
+        given_dims: str,
+        dim_specs: list,
+        native_shape: Optional[Tuple[int, ...]] = None,
     ) -> np.ndarray:
         """
         Read the sub-region described by ``dim_specs`` directly from the file.
@@ -519,7 +522,13 @@ class Reader(BaseReader):
         libCZI level. Spatial dims (Y, X, Samples) are read in full and cropped in
         memory via ``plane_specs``. Integer specs drop their axis, so the result
         is in the post-getitem dim order (``finalize_dims`` then reorders it).
+
+        ``native_shape`` is the current scene's native shape; when omitted it is
+        derived via :meth:`_derive_native_scene_shape` (still graph-free), so the
+        method also satisfies the base ``_read_indexed`` contract.
         """
+        if native_shape is None:
+            _, native_shape = self._derive_native_scene_shape()
         spatial = (
             DimensionNames.SpatialY,
             DimensionNames.SpatialX,

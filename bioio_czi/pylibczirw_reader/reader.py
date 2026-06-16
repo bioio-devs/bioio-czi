@@ -263,11 +263,7 @@ class Reader(BaseReader):
         """
 
         # Freeze the scene / ROI for lazy builder invocation.
-        if len(self._scenes_bounding_rectangle) == 0:
-            current_scene, current_roi = None, None
-        else:
-            current_scene = self._get_czi_scene_index()
-            current_roi = self._scenes_bounding_rectangle[current_scene]
+        current_scene, current_roi = self._current_scene_roi()
 
         def array_builder(indices: tuple[int]) -> int:
             assert len(indices) >= len(
@@ -282,6 +278,30 @@ class Reader(BaseReader):
             return np.squeeze(result)
 
         return array_builder
+
+    def _current_scene_roi(self) -> Tuple[Optional[int], Any]:
+        """
+        Resolve the ``(czi_scene_index, highest-resolution ROI)`` for the current
+        scene, for use with ``file.read(scene=, roi=)``.
+
+        ROI stands for Region Of Interest. In pylibczi's read method, the default
+        ROI is the bounding rectangle of the scene **across all zoom levels**. We
+        read just the highest resolution level (zoom = 1), which is smaller than
+        the default ROI in some cases. For example, scene 0 of the test file
+        S=2_4x2_T=2=Z=3_CH=2.czi is 947x487 at the highest resolution, but 948x488
+        when all zoom levels are considered. (At zoom 0.5 the result is
+        ceiling(947/2) x ceiling(487/2).) See also file.scenes_bounding_rectangle
+        vs. file.scenes_bounding_rectangle_no_pyramid.
+
+        NOTE: self._current_scene_index is a BioIO scene index (0..N-1); it is
+        mapped to the underlying CZI scene index before use with pylibczirw or
+        _scenes_bounding_rectangle.
+        """
+        # Some files have no scenes but can still be read if scene is not specified.
+        if len(self._scenes_bounding_rectangle) == 0:
+            return None, None
+        czi_scene_index = self._get_czi_scene_index()
+        return czi_scene_index, self._scenes_bounding_rectangle[czi_scene_index]
 
     def _derive_native_scene_shape(self) -> Tuple[str, Tuple[int, ...]]:
         """
@@ -354,7 +374,7 @@ class Reader(BaseReader):
         dim_specs, new_dims = compute_dim_specs(
             native_shape, native_order, dimension_order_out, **kwargs
         )
-        region = self._read_region(native_order, native_shape, dim_specs)
+        region = self._read_indexed(native_order, dim_specs, native_shape)
         # finalize_dims is typed ArrayLike; region is a numpy array, so is this.
         return cast(
             np.ndarray,
@@ -399,8 +419,11 @@ class Reader(BaseReader):
             f"{type(spec).__name__}."
         )
 
-    def _read_region(
-        self, given_dims: str, native_shape: Tuple[int, ...], dim_specs: list
+    def _read_indexed(
+        self,
+        given_dims: str,
+        dim_specs: list,
+        native_shape: Optional[Tuple[int, ...]] = None,
     ) -> np.ndarray:
         """
         Read the sub-region described by ``dim_specs`` directly from the file.
@@ -412,7 +435,13 @@ class Reader(BaseReader):
         axis, so it is cropped in memory. Integer specs drop their axis, so the
         result is in the post-getitem dim order (``finalize_dims`` then reorders
         to the requested output order).
+
+        ``native_shape`` is the current scene's native shape; when omitted it is
+        derived via :meth:`_derive_native_scene_shape` (still graph-free), so the
+        method also satisfies the base ``_read_indexed`` contract.
         """
+        if native_shape is None:
+            _, native_shape = self._derive_native_scene_shape()
         y_index = given_dims.index(DimensionNames.SpatialY)
         cullable_dims = given_dims[:y_index]  # e.g. "TCZ"
         has_samples = DimensionNames.Samples in given_dims

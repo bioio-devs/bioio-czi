@@ -883,7 +883,7 @@ def test_get_image_data_reads_only_requested_planes_aics(
     [
         # Empty selection along a cullable (non-spatial) dim leaves the read loop
         # with nothing to iterate, exercising the empty-result fallback in
-        # _read_region. The result must keep its full spatial dimensionality.
+        # _read_indexed. The result must keep its full spatial dimensionality.
         ("s_3_t_1_c_3_z_5.czi", "CZYX", {"C": slice(0, 0)}),
         ("s_3_t_1_c_3_z_5.czi", "CZYX", {"Z": slice(0, 0), "C": 1}),
         # RGB (has a Samples axis) empty selection along the cullable T dim.
