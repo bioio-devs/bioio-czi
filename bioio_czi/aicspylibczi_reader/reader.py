@@ -581,9 +581,17 @@ class Reader(BaseReader):
                 out[out_pos] = cropped
 
         if out is None:
-            # Empty selection along a kept dim; build a correctly-shaped empty.
-            # Use the pixel dtype directly (self.dtype would build the graph).
-            out = np.empty(tuple(kept_lengths), dtype=pixel_type)
+            # Empty selection along a cullable dim (e.g. C=slice(0, 0)): the read
+            # loop never ran, so one of kept_lengths is 0. Reconstruct the spatial
+            # (Y/X[/S]) extent analytically -- the same shape `cropped` would have
+            # had -- so the result keeps its full dimensionality and finalize_dims
+            # can reorder it. Use the pixel dtype directly (self.dtype would build
+            # the graph).
+            spatial_full = tuple(
+                native_shape[i] for i, d in enumerate(given_dims) if d in spatial
+            )
+            spatial_shape = np.empty(spatial_full)[plane_specs].shape
+            out = np.empty(tuple(kept_lengths) + spatial_shape, dtype=pixel_type)
         return out
 
     def _create_dask_array(self, czi: CziFile) -> xr.DataArray:
