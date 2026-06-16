@@ -826,3 +826,53 @@ def test_czi_reader_stitch_tiles_clamps_bbox_mismatch() -> None:
 
     # The overlapping region should match the original tile data
     np.testing.assert_array_equal(stitched[:, 0:4, 0:5], tile_data)
+
+
+# ---------------------------------------------------------------------------
+# Fast sub-slice read optimization (get_image_data reads only requested planes)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "filename, order, kwargs",
+    [
+        ("s_3_t_1_c_3_z_5.czi", "ZYX", {"C": 1}),
+        ("s_3_t_1_c_3_z_5.czi", "CZYX", {"C": [0, 2]}),
+        ("s_3_t_1_c_3_z_5.czi", "CZYX", {"Z": slice(0, 4, 2)}),
+        ("s_3_t_1_c_3_z_5.czi", "CZYX", {"C": (0, -1)}),
+        ("RGB-8bit.czi", "YXS", {}),
+        ("RGB-8bit-with-non-xy-dims.czi", "ZYXS", {"Z": 0}),
+    ],
+)
+def test_get_image_data_matches_full_slice_aics(
+    filename: str, order: str, kwargs: dict
+) -> None:
+    from bioio_base import transforms
+
+    reader = Reader(
+        LOCAL_RESOURCES_DIR / filename, use_aicspylibczi=True
+    )._implementation
+    expected = transforms.reshape_data(reader.data, reader.dims.order, order, **kwargs)
+    actual = reader.get_image_data(order, **kwargs)
+    np.testing.assert_array_equal(actual, expected)
+
+
+def test_get_image_data_reads_only_requested_planes_aics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reader = Reader(
+        LOCAL_RESOURCES_DIR / "s_3_t_1_c_3_z_5.czi", use_aicspylibczi=True
+    )._implementation
+    # s_3_t_1_c_3_z_5: T=1, C=3, Z=5 -> dims CZYX. C=1 over Z=5 -> 5 plane reads.
+    assert reader.dims.order == "CZYX"
+
+    calls = {"n": 0}
+    real_plane = AicsPyLibCziReader._read_plane
+
+    def counting_plane(czi: Any, scene: int, read_dims: Any = None) -> Any:
+        calls["n"] += 1
+        return real_plane(czi, scene, read_dims)
+
+    monkeypatch.setattr(AicsPyLibCziReader, "_read_plane", staticmethod(counting_plane))
+    reader.get_image_data("ZYX", C=1)
+    assert calls["n"] == 5
