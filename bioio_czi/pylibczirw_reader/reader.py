@@ -294,9 +294,6 @@ class Reader(BaseReader):
         loaded ``_total_bounding_box`` / ``_scenes_bounding_rectangle`` instead of
         materializing the whole-image lazy graph.
 
-        Takes no arguments; operates on the current scene
-        (``self._current_scene_index``).
-
         Returns
         -------
         order : str
@@ -306,11 +303,6 @@ class Reader(BaseReader):
         shape : Tuple[int, ...]
             The size of each dimension in ``order``, with Y/X cropped to the
             current scene's bounding rectangle.
-
-        Notes
-        -----
-        Mirrors the dimension/shape bookkeeping in ``_read_delayed`` (including
-        the trailing ``Samples`` axis for BGR images); keep the two in sync.
         """
         dim_bounds = dict(self._total_bounding_box)
         if len(self._scenes_bounding_rectangle) > 0:

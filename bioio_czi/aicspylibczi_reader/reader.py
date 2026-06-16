@@ -1,10 +1,9 @@
-import itertools
 import logging
 import xml.etree.ElementTree as ET
 from copy import copy
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, Hashable, List, Optional, Tuple, Union, cast
+from typing import Any, Dict, Hashable, List, Optional, Tuple, Union
 
 import dask.array as da
 import numpy as np
@@ -21,7 +20,6 @@ from bioio_base.dimensions import (
     Dimensions,
 )
 from bioio_base.reader import Reader as BaseReader
-from bioio_base.transforms import compute_dim_specs, finalize_dims
 from dask import delayed
 from fsspec.implementations.local import LocalFileSystem
 from fsspec.spec import AbstractFileSystem
@@ -41,11 +39,6 @@ log = logging.getLogger(__name__)
 CZI_SAMPLES_DIM_CHAR = "A"
 CZI_BLOCK_DIM_CHAR = "B"
 CZI_SCENE_DIM_CHAR = "S"
-
-# Maps BioIO dimension chars back to CZI-native read_image chars. Only Samples
-# differs (BioIO "S" <- CZI "A"); all other non-spatial dims (T/C/Z/M/...) are
-# identical in both schemes.
-_BIOIO_TO_CZI_DIM = {DimensionNames.Samples: CZI_SAMPLES_DIM_CHAR}
 
 
 ###############################################################################
@@ -373,218 +366,42 @@ class Reader(BaseReader):
         read_dimensions: List[Tuple[str, int]]]
             The dimension sizes that were returned from the read.
         """
-        # Init czi and delegate to the shared single-plane read.
+        # Catch optional read dim
+        if read_dims is None:
+            read_dims = {}
+
+        # Init czi
         with fs.open(path) as open_resource:
             czi = CziFile(open_resource.f)
-            return Reader._read_plane(czi, scene, read_dims)
 
-    @staticmethod
-    def _read_plane(
-        czi: CziFile,
-        scene: int,
-        read_dims: Optional[Dict[str, int]] = None,
-    ) -> Tuple[np.ndarray, List[Tuple[str, int]]]:
-        """
-        Read one (sub-)plane from an already-open CziFile.
-
-        ``read_dims`` uses CZI-native dim chars and absolute indices. Dims present
-        in read_dims (plus the block dim) are dropped to a single index; any dim
-        not given (Y, X, Samples, ...) is read in full.
-
-        Parameters
-        ----------
-        czi: CziFile
-            An open CziFile to read from.
-        scene: int
-            The BioIO scene index to pull the plane from.
-        read_dims: Optional[Dict[str, int]]
-            The dimensions to fix as a dictionary of CZI-native char to absolute
-            index. Default: None (read all data from the image).
-
-        Returns
-        -------
-        chunk: np.ndarray
-            The image chunk read as a numpy array (fixed dims dropped).
-        read_dimensions: List[Tuple[str, int]]
-            The dimension info for the dims that remained in the chunk.
-        """
-        # Copy so we don't mutate the caller's dict when injecting the scene.
-        read_dims = dict(read_dims) if read_dims else {}
-
-        # Get current scene read dims
-        adjusted_scene_index = Reader._adjust_scene_index(
-            czi.get_dims_shape(), scene, czi.shape_is_consistent
-        )
-        read_dims[CZI_SCENE_DIM_CHAR] = adjusted_scene_index
-
-        # Read image
-        data, dims = czi.read_image(**read_dims)
-
-        # Drop dims that shouldn't be provided back
-        ops: List[Union[int, slice]] = []
-        real_dims = []
-        for dim_info in dims:
-            # Expand dimension info
-            dim, _ = dim_info
-
-            # If the dim was provided in the read dims
-            # we know a single plane for that dimension was requested so remove it
-            if dim in read_dims or dim == CZI_BLOCK_DIM_CHAR:
-                ops.append(0)
-
-            # Otherwise just read the full slice
-            else:
-                ops.append(slice(None, None, None))
-                real_dims.append(dim_info)
-
-        # Convert ops and run getitem
-        return data[tuple(ops)], real_dims
-
-    def _derive_native_scene_shape(self) -> Tuple[str, Tuple[int, ...]]:
-        """
-        Resolve the native dimension order and shape of the current scene from
-        ``CziFile.get_dims_shape()``, without building the per-plane dask graph
-        that ``self.dims`` / ``self.shape`` would trigger via ``_read_delayed`` /
-        ``_create_dask_array``.
-
-        This keeps a sub-region read cheap: a fresh reader (e.g. one per shard in
-        a parallel conversion) resolves order/shape from the per-scene dim sizes
-        instead of materializing the whole-image lazy graph.
-
-        Takes no arguments; operates on the current scene
-        (``self.current_scene_index``).
-
-        Returns
-        -------
-        order : str
-            The native dimension order (``self.mapped_dims``), e.g. ``"TCZYX"``.
-        shape : Tuple[int, ...]
-            The size of each dimension in ``order`` for the current scene.
-
-        Notes
-        -----
-        Mirrors the sizing in ``_create_dask_array`` (which uses
-        ``dims_shape[char][1]`` per dim); keep the two in sync.
-        """
-        order = self.mapped_dims
-        with self._fs.open(self._path) as open_resource:
-            czi = CziFile(open_resource.f)
-            dims_shape = Reader._dims_shape_to_scene_dims_shape(
-                czi.get_dims_shape(),
-                self.current_scene_index,
-                czi.shape_is_consistent,
+            # Get current scene read dims
+            adjusted_scene_index = Reader._adjust_scene_index(
+                czi.get_dims_shape(), scene, czi.shape_is_consistent
             )
-        dims_shape.pop(CZI_BLOCK_DIM_CHAR, None)
-        shape = tuple(dims_shape[_BIOIO_TO_CZI_DIM.get(d, d)][1] for d in order)
-        return order, shape
+            read_dims[CZI_SCENE_DIM_CHAR] = adjusted_scene_index
 
-    def get_image_data(
-        self, dimension_order_out: Optional[str] = None, **kwargs: Any
-    ) -> np.ndarray:
-        """
-        Read specific dimension image data as a numpy array.
+            # Read image
+            data, dims = czi.read_image(**read_dims)
 
-        Reads only the requested planes directly from the file. The native
-        order/shape are resolved via :meth:`_derive_native_scene_shape`, so -- unlike
-        the base implementation -- this never triggers ``_read_delayed`` (the
-        whole-image dask graph), which is both slow and memory-heavy when a fresh
-        reader is created per read (e.g. per shard across parallel conversion
-        workers).
+            # Drop dims that shouldn't be provided back
+            ops: List[Union[int, slice]] = []
+            real_dims = []
+            for dim_info in dims:
+                # Expand dimension info
+                dim, _ = dim_info
 
-        ``dimension_order_out=None`` keeps the base behavior (returns the full
-        ``self.data``). See the base ``Reader.get_image_data`` for parameter
-        details.
-        """
-        if dimension_order_out is None:
-            return super().get_image_data(None, **kwargs)
-        native_order, native_shape = self._derive_native_scene_shape()
-        dim_specs, new_dims = compute_dim_specs(
-            native_shape, native_order, dimension_order_out, **kwargs
-        )
-        region = self._read_region(native_order, native_shape, dim_specs)
-        # finalize_dims is typed ArrayLike; region is a numpy array, so is this.
-        return cast(
-            np.ndarray,
-            finalize_dims(region, new_dims, native_order, dimension_order_out),
-        )
+                # If the dim was provided in the read dims
+                # we know a single plane for that dimension was requested so remove it
+                if dim in read_dims or dim == CZI_BLOCK_DIM_CHAR:
+                    ops.append(0)
 
-    def _read_region(
-        self, given_dims: str, native_shape: Tuple[int, ...], dim_specs: list
-    ) -> np.ndarray:
-        """
-        Read the sub-region described by ``dim_specs`` directly from the file.
+                # Otherwise just read the full slice
+                else:
+                    ops.append(slice(None, None, None))
+                    real_dims.append(dim_info)
 
-        Cullable dims (everything except Y, X, Samples) are read one plane at a
-        time via ``read_image``, which reads only the requested sub-blocks at the
-        libCZI level. Spatial dims (Y, X, Samples) are read in full and cropped in
-        memory via ``plane_specs``. Integer specs drop their axis, so the result
-        is in the post-getitem dim order (``finalize_dims`` then reorders it).
-        """
-        spatial = (
-            DimensionNames.SpatialY,
-            DimensionNames.SpatialX,
-            DimensionNames.Samples,
-        )
-        cullable = [(i, d) for i, d in enumerate(given_dims) if d not in spatial]
-        plane_specs = tuple(
-            spec for d, spec in zip(given_dims, dim_specs) if d in spatial
-        )
-
-        with self._fs.open(self._path) as open_resource:
-            czi = CziFile(open_resource.f)
-            dims_shape = Reader._dims_shape_to_scene_dims_shape(
-                czi.get_dims_shape(),
-                self.current_scene_index,
-                czi.shape_is_consistent,
-            )
-            pixel_type = PIXEL_DICT.get(czi.pixel_type)
-            if pixel_type is None:
-                raise TypeError(f"Pixel type: {czi.pixel_type} is not supported.")
-
-            # Resolve each cullable dim to (czi_char, [(out_pos|None, abs_idx)...]).
-            # read_image wants absolute CZI indices: begin + position.
-            enumerated: List[Tuple[str, list]] = []
-            kept_lengths: List[int] = []
-            for i, d in cullable:
-                czi_char = _BIOIO_TO_CZI_DIM.get(d, d)
-                begin = dims_shape[czi_char][0]
-                size_i = native_shape[i]
-                spec = dim_specs[i]
-                if isinstance(spec, slice):
-                    idxs = list(range(*spec.indices(size_i)))
-                    enumerated.append(
-                        (czi_char, [(p, begin + j) for p, j in enumerate(idxs)])
-                    )
-                    kept_lengths.append(len(idxs))
-                elif isinstance(spec, list):
-                    idxs = [j % size_i for j in spec]
-                    enumerated.append(
-                        (czi_char, [(p, begin + j) for p, j in enumerate(idxs)])
-                    )
-                    kept_lengths.append(len(idxs))
-                else:  # int -> fixed, axis dropped
-                    enumerated.append((czi_char, [(None, begin + int(spec) % size_i)]))
-
-            out: Optional[np.ndarray] = None
-            for combo in itertools.product(*(entries for _c, entries in enumerated)):
-                out_pos = tuple(p for p, _idx in combo if p is not None)
-                read_dims = {
-                    czi_char: idx
-                    for (czi_char, _entries), (_p, idx) in zip(enumerated, combo)
-                }
-                plane, _ = Reader._read_plane(czi, self.current_scene_index, read_dims)
-                cropped = plane[plane_specs]
-                if out is None:
-                    out = np.empty(
-                        tuple(kept_lengths) + cropped.shape, dtype=cropped.dtype
-                    )
-                out[out_pos] = cropped
-
-        if out is None:
-            # Empty selection along a kept dim; build a correctly-shaped empty.
-            # Use the pixel dtype directly (self.dtype would build the graph).
-            out = np.empty(tuple(kept_lengths), dtype=pixel_type)
-        return out
+            # Convert ops and run getitem
+            return data[tuple(ops)], real_dims
 
     def _create_dask_array(self, czi: CziFile) -> xr.DataArray:
         """
