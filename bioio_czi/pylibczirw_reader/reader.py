@@ -12,7 +12,6 @@ from typing import (
     Optional,
     Tuple,
     Union,
-    cast,
 )
 from xml.etree import ElementTree as ET
 
@@ -26,7 +25,6 @@ from bioio_base.dimensions import (
     Dimensions,
 )
 from bioio_base.reader import Reader as BaseReader
-from bioio_base.transforms import compute_dim_specs, finalize_dims
 from bioio_base.types import PhysicalPixelSizes
 from dask import delayed
 from fsspec.spec import AbstractFileSystem
@@ -303,83 +301,45 @@ class Reader(BaseReader):
         czi_scene_index = self._get_czi_scene_index()
         return czi_scene_index, self._scenes_bounding_rectangle[czi_scene_index]
 
-    def _derive_native_scene_shape(self) -> Tuple[str, Tuple[int, ...]]:
+    @property
+    def dims(self) -> Dimensions:
         """
-        Resolve the native dimension order and shape of the current scene from
-        the CZI bounding-box metadata, without building the per-plane dask graph
-        that ``self.dims`` / ``self.shape`` would trigger via ``_read_delayed``.
-
-        This is what keeps a sub-region read cheap: a fresh reader (e.g. one per
-        shard in a parallel conversion) can resolve order/shape from the already
-        loaded ``_total_bounding_box`` / ``_scenes_bounding_rectangle`` instead of
-        materializing the whole-image lazy graph.
-
-        Returns
-        -------
-        order : str
-            The native dimension order, e.g. ``"TCZYX"`` (with a trailing ``"S"``
-            Samples axis appended for BGR images). The last two axes are always
-            ``YX``.
-        shape : Tuple[int, ...]
-            The size of each dimension in ``order``, with Y/X cropped to the
-            current scene's bounding rectangle.
+        Native dimension order and shape of the current scene, resolved from the
+        CZI bounding-box metadata instead of off the lazy DataArray.
         """
-        dim_bounds = dict(self._total_bounding_box)
-        if len(self._scenes_bounding_rectangle) > 0:
-            rect = self._scenes_bounding_rectangle[self._get_czi_scene_index()]
-            dim_bounds[DimensionNames.SpatialX] = (rect.x, rect.x + rect.w)
-            dim_bounds[DimensionNames.SpatialY] = (rect.y, rect.y + rect.h)
+        if self._dims is None:
+            dim_bounds = dict(self._total_bounding_box)
+            if len(self._scenes_bounding_rectangle) > 0:
+                rect = self._scenes_bounding_rectangle[self._get_czi_scene_index()]
+                dim_bounds[DimensionNames.SpatialX] = (rect.x, rect.x + rect.w)
+                dim_bounds[DimensionNames.SpatialY] = (rect.y, rect.y + rect.h)
 
-        coords = self._get_coords(
-            self.metadata, self._get_czi_scene_index(), dim_bounds
-        )
-        ordered_dims = [
-            d
-            for d in DEFAULT_DIMENSION_ORDER_LIST
-            if d in coords or size(self._total_bounding_box, d) > 1
-        ]
-        assert ordered_dims[-2:] == [
-            DimensionNames.SpatialY,
-            DimensionNames.SpatialX,
-        ]
-        shape = tuple(
-            len(coords[d]) if d in coords else size(self._total_bounding_box, d)
-            for d in ordered_dims
-        )
-        if "Bgr" in self._pixel_types[0]:
-            ordered_dims = ordered_dims + [DimensionNames.Samples]
-            shape = shape + (3,)
-        return "".join(ordered_dims), shape
+            coords = self._get_coords(
+                self.metadata, self._get_czi_scene_index(), dim_bounds
+            )
+            ordered_dims = [
+                d
+                for d in DEFAULT_DIMENSION_ORDER_LIST
+                if d in coords or size(self._total_bounding_box, d) > 1
+            ]
+            assert ordered_dims[-2:] == [
+                DimensionNames.SpatialY,
+                DimensionNames.SpatialX,
+            ]
+            shape = tuple(
+                len(coords[d]) if d in coords else size(self._total_bounding_box, d)
+                for d in ordered_dims
+            )
+            if "Bgr" in self._pixel_types[0]:
+                ordered_dims = ordered_dims + [DimensionNames.Samples]
+                shape = shape + (3,)
+            self._dims = Dimensions(dims="".join(ordered_dims), shape=shape)
+        return self._dims
 
-    def get_image_data(
-        self, dimension_order_out: Optional[str] = None, **kwargs: Any
-    ) -> np.ndarray:
-        """
-        Read specific dimension image data as a numpy array.
-
-        Reads only the requested sub-region directly from the file. The native
-        order/shape are resolved from the bounding boxes via
-        :meth:`_derive_native_scene_shape`, so -- unlike the base implementation --
-        this never triggers ``_read_delayed`` (the whole-image dask graph). That
-        graph build is both slow and memory-heavy when a fresh reader is created
-        per read (e.g. per shard across parallel conversion workers).
-
-        ``dimension_order_out=None`` keeps the base behavior (returns the full
-        ``self.data``). See the base ``Reader.get_image_data`` for parameter
-        details.
-        """
-        if dimension_order_out is None:
-            return super().get_image_data(None, **kwargs)
-        native_order, native_shape = self._derive_native_scene_shape()
-        dim_specs, new_dims = compute_dim_specs(
-            native_shape, native_order, dimension_order_out, **kwargs
-        )
-        region = self._read_indexed(native_order, dim_specs, native_shape)
-        # finalize_dims is typed ArrayLike; region is a numpy array, so is this.
-        return cast(
-            np.ndarray,
-            finalize_dims(region, new_dims, native_order, dimension_order_out),
-        )
+    @property
+    def shape(self) -> Tuple[int, ...]:
+        """Native scene shape (graph-free)."""
+        return self.dims.shape
 
     @staticmethod
     def _spatial_window(
@@ -419,12 +379,7 @@ class Reader(BaseReader):
             f"{type(spec).__name__}."
         )
 
-    def _read_indexed(
-        self,
-        given_dims: str,
-        dim_specs: list,
-        native_shape: Optional[Tuple[int, ...]] = None,
-    ) -> np.ndarray:
+    def _read_indexed(self, given_dims: str, dim_specs: list) -> np.ndarray:
         """
         Read the sub-region described by ``dim_specs`` directly from the file.
 
@@ -435,13 +390,8 @@ class Reader(BaseReader):
         axis, so it is cropped in memory. Integer specs drop their axis, so the
         result is in the post-getitem dim order (``finalize_dims`` then reorders
         to the requested output order).
-
-        ``native_shape`` is the current scene's native shape; when omitted it is
-        derived via :meth:`_derive_native_scene_shape` (still graph-free), so the
-        method also satisfies the base ``_read_indexed`` contract.
         """
-        if native_shape is None:
-            _, native_shape = self._derive_native_scene_shape()
+        native_shape = self.shape
         y_index = given_dims.index(DimensionNames.SpatialY)
         cullable_dims = given_dims[:y_index]  # e.g. "TCZ"
         has_samples = DimensionNames.Samples in given_dims

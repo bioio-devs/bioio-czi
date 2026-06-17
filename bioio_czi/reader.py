@@ -191,16 +191,30 @@ class Reader(BaseReader):
     def current_scene_index(self) -> int:
         return self._implementation.current_scene_index
 
-    def get_image_data(
-        self, dimension_order_out: Optional[str] = None, **kwargs: Any
-    ) -> np.ndarray:
+    @property
+    def shape(self) -> Tuple[int, ...]:
         """
-        Read specific dimension image data as a numpy array.
+        Delegate to the active backend's (graph-free) shape so the inherited base
+        ``get_image_data`` builds its indexer without a whole-image dask graph.
+        See the backend ``shape`` override.
+        """
+        return self._implementation.shape
 
-        Delegates to the active backend so its sub-region read path
-        (``get_image_data`` / ``_read_indexed``) is actually reached.
+    @property
+    def dims(self) -> Dimensions:
         """
-        return self._implementation.get_image_data(dimension_order_out, **kwargs)
+        Delegate to the active backend's (graph-free) dims so the inherited base
+        ``get_image_data`` resolves the native order without a whole-image dask
+        graph. See the backend ``dims`` override.
+        """
+        return self._implementation.dims
+
+    def _read_indexed(self, given_dims: str, dim_specs: list) -> np.ndarray:
+        """
+        Delegate the sub-region read to the active backend, so the inherited base
+        ``get_image_data`` reaches the backend's efficient ``_read_indexed``.
+        """
+        return self._implementation._read_indexed(given_dims, dim_specs)
 
     def _read_delayed(self) -> xr.DataArray:
         """
