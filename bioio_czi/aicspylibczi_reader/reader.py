@@ -507,7 +507,9 @@ class Reader(BaseReader):
             )
             pixel_type = PIXEL_DICT.get(czi.pixel_type)
             if pixel_type is None:
-                raise TypeError(f"Pixel type: {czi.pixel_type} is not supported.")
+                raise TypeError(
+                    f"Unsupported or unlabeled pixel type: {czi.pixel_type!r}"
+                )
 
             # Resolve each cullable dim to (czi_char, [(out_pos|None, abs_idx)...]).
             # read_image wants absolute CZI indices: begin + position.
@@ -677,7 +679,9 @@ class Reader(BaseReader):
             # Get pixel type and catch unsupported
             pixel_type = PIXEL_DICT.get(czi.pixel_type)
             if pixel_type is None:
-                raise TypeError(f"Pixel type: {czi.pixel_type} is not supported.")
+                raise TypeError(
+                    f"Unsupported or unlabeled pixel type: {czi.pixel_type!r}"
+                )
 
             # Add delayed array to lazy arrays at index
             lazy_arrays[np_index] = da.from_delayed(
