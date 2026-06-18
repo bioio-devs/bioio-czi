@@ -194,25 +194,45 @@ class Reader(BaseReader):
     @property
     def shape(self) -> Tuple[int, ...]:
         """
-        Delegate to the active backend's (graph-free) shape so the inherited base
-        ``get_image_data`` builds its indexer without a whole-image dask graph.
-        See the backend ``shape`` override.
+        Shape of the current scene's image array.
+
+        Returns
+        -------
+        shape: Tuple[int, ...]
+            Tuple of the image array's dimensions.
         """
         return self._implementation.shape
 
     @property
     def dims(self) -> Dimensions:
         """
-        Delegate to the active backend's (graph-free) dims so the inherited base
-        ``get_image_data`` resolves the native order without a whole-image dask
-        graph. See the backend ``dims`` override.
+        Dimension names and sizes of the current scene's image array.
+
+        Returns
+        -------
+        dims: Dimensions
+            Object with the paired dimension names and their sizes.
         """
         return self._implementation.dims
 
     def _read_indexed(self, given_dims: str, dim_specs: list) -> np.ndarray:
         """
-        Delegate the sub-region read to the active backend, so the inherited base
-        ``get_image_data`` reaches the backend's efficient ``_read_indexed``.
+        Return the native-order array with ``dim_specs`` applied. This
+        lets ``get_image_data`` read only the requested sub-region.
+
+
+        Parameters
+        ----------
+        given_dims: str
+            The native dimension ordering of the image (``self.dims.order``).
+        dim_specs: list
+            One getitem operation per dimension in ``given_dims``, as produced by
+            ``transforms.compute_dim_specs``.
+
+        Returns
+        -------
+        data: np.ndarray
+            The indexed image data in native (reduced) dimension order.
         """
         return self._implementation._read_indexed(given_dims, dim_specs)
 

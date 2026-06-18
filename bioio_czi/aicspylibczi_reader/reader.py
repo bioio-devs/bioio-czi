@@ -442,21 +442,15 @@ class Reader(BaseReader):
     @property
     def dims(self) -> Dimensions:
         """
-        Native dimension order and shape of the current scene, resolved from
-        ``CziFile.get_dims_shape()`` instead of off the lazy DataArray.
+        Dimension names and sizes of the current scene.
 
-        Overriding ``dims`` (and ``shape``) here is what keeps the inherited base
-        ``get_image_data`` cheap: it builds its indexer from these without ever
-        triggering ``_read_delayed`` / ``_create_dask_array`` (the whole-image
-        dask graph), which is slow and memory-heavy when a fresh reader is created
-        per read (e.g. one per shard in a parallel conversion). The result equals
-        the graph-built dims/shape (verified across grayscale, RGB, and mosaic).
-        Cached in ``self._dims`` and reset on ``set_scene``.
+        We override here to fetch from CZI metadata directly instead of
+        deriving it from ``xarray_dask_data`` (the base implementation).
 
-        Notes
-        -----
-        Mirrors the sizing in ``_create_dask_array`` (which uses
-        ``dims_shape[char][1]`` per dim); keep the two in sync.
+        Returns
+        -------
+        dims: Dimensions
+            Object with the paired dimension names and their sizes.
         """
         if self._dims is None:
             order = self.mapped_dims
@@ -474,18 +468,40 @@ class Reader(BaseReader):
 
     @property
     def shape(self) -> Tuple[int, ...]:
-        """Native scene shape (graph-free); see :attr:`dims`."""
+        """
+        Shape of the current scene.
+
+        We override here to fetch from CZI metadata directly instead of
+        deriving it from ``xarray_dask_data`` (the base implementation).
+
+        Returns
+        -------
+        shape: Tuple[int, ...]
+            Tuple of the image array's dimensions.
+        """
         return self.dims.shape
 
     def _read_indexed(self, given_dims: str, dim_specs: list) -> np.ndarray:
         """
-        Read only the requested non-spatial planes for ``get_image_data``.
+        Return the native-order array with ``dim_specs`` applied.
 
-        Cullable dims (everything except Y, X, Samples) are read one plane at a
-        time via ``read_image``, which reads only the requested sub-blocks at the
-        libCZI level. Spatial dims (Y, X, Samples) are read in full and cropped in
-        memory via ``plane_specs``. The result matches
-        ``self.data[tuple(dim_specs)]`` — integer specs drop their axis.
+        This lets ``get_image_data`` read only the requested sub-region. It
+        reads each plane one at a time via ``_read_plane`` (which fetches only
+        the requested sub-blocks at the libCZI level), then crops the
+        Y/X/Samples selection in memory.
+
+        Parameters
+        ----------
+        given_dims: str
+            The native dimension ordering of the image (``self.dims.order``).
+        dim_specs: list
+            One getitem operation per dimension in ``given_dims``, as produced by
+            ``transforms.compute_dim_specs``.
+
+        Returns
+        -------
+        data: np.ndarray
+            The indexed image data in native (reduced) dimension order.
         """
         native_shape = self.shape
         spatial = (
@@ -551,12 +567,8 @@ class Reader(BaseReader):
                 out[out_pos] = cropped
 
         if out is None:
-            # Empty selection along a cullable dim (e.g. C=slice(0, 0)): the read
-            # loop never ran, so one of kept_lengths is 0. Reconstruct the spatial
-            # (Y/X[/S]) extent analytically -- the same shape `cropped` would have
-            # had -- so the result keeps its full dimensionality and finalize_dims
-            # can reorder it. Use the pixel dtype directly (self.dtype would build
-            # the graph).
+            # A dim selected nothing (e.g. C=slice(0, 0)) so the read
+            # loop never ran; build a full-dimensionality empty result.
             spatial_full = tuple(
                 native_shape[i] for i, d in enumerate(given_dims) if d in spatial
             )

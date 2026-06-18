@@ -304,8 +304,15 @@ class Reader(BaseReader):
     @property
     def dims(self) -> Dimensions:
         """
-        Native dimension order and shape of the current scene, resolved from the
-        CZI bounding-box metadata instead of off the lazy DataArray.
+        Dimension names and sizes of the current scene.
+
+        We override here to fetch from CZI metadata directly instead of
+        deriving it from ``xarray_dask_data`` (the base implementation).
+
+        Returns
+        -------
+        dims: Dimensions
+            Object with the paired dimension names and their sizes.
         """
         if self._dims is None:
             dim_bounds = dict(self._total_bounding_box)
@@ -338,7 +345,17 @@ class Reader(BaseReader):
 
     @property
     def shape(self) -> Tuple[int, ...]:
-        """Native scene shape (graph-free)."""
+        """
+        Shape of the current scene.
+
+        We override here to fetch from CZI metadata directly instead of
+        deriving it from ``xarray_dask_data`` (the base implementation).
+
+        Returns
+        -------
+        shape: Tuple[int, ...]
+            Tuple of the image array's dimensions.
+        """
         return self.dims.shape
 
     @staticmethod
@@ -346,20 +363,22 @@ class Reader(BaseReader):
         spec: Union[int, slice, list], size: int
     ) -> Tuple[int, int, Any]:
         """
-        Translate a single spatial (Y or X) getitem spec into an on-disk read
-        window plus a residual in-window index.
+        pylibCZIrw reads pixels off disk as a single contiguous rectangle (an
+        ROI), but a caller can select this axis with an int, a slice (possibly
+        strided), or a list of indices -- none of which an ROI expresses
+        directly. So we split the selection into two pieces:
 
-        Returns ``(start, extent, residual)`` where ``[start, start + extent)``
-        is the contiguous range to read from the file (the pylibCZIrw ROI) and
-        ``residual`` is the index to apply to that read window so the result
-        matches ``full_plane[spec]`` exactly. This lets us read only the
-        requested rectangle off disk while still honoring lists / strided slices
-        (which are not expressible as a single ROI) via the residual.
+        - ``(start, extent)``: the smallest contiguous range covering everything
+          the caller asked for. This is the ROI we actually read off disk.
+        - ``residual``: the index then applied to that read window, in memory, to
+          recover the exact selection -- drop the axis (int), re-apply the stride
+          (strided slice), or pick out the listed positions (list).
 
-        - int ``k``      -> ``(k, 1, 0)``                  (axis dropped)
-        - contiguous slice -> ``(start, stop - start, slice(None))``
-        - strided slice  -> bounding range + ``slice(0, extent, step)``
-        - list of indices -> bounding range + ``[j - lo for j in idxs]``
+        Reading the bounding range and re-indexing keeps disk reads small while
+        still honoring selections an ROI alone cannot express.
+
+        Returns ``(start, extent, residual)`` for the given ``spec`` and axis
+        ``size``.
         """
         if isinstance(spec, (int, np.integer)):
             k = int(spec) % size
@@ -381,24 +400,31 @@ class Reader(BaseReader):
 
     def _read_indexed(self, given_dims: str, dim_specs: list) -> np.ndarray:
         """
-        Read the sub-region described by ``dim_specs`` directly from the file.
+        Return the native-order array with ``dim_specs`` applied.
 
-        Cullable dims (everything before Y: T/C/Z/M/...) are read one plane at a
-        time. The Y/X selection is translated into a single pylibCZIrw ROI so
-        only the requested rectangle is read off disk (lists / strided slices are
-        honored via an in-window residual index). Samples (BGR) is not a file
-        axis, so it is cropped in memory. Integer specs drop their axis, so the
-        result is in the post-getitem dim order (``finalize_dims`` then reorders
-        to the requested output order).
+        This lets ``get_image_data`` read only the requested sub-region. It
+        reads each plane one at a time and translates the Y/X selection into a
+        single ROI, so only the requested area is read off disk.
+
+        Parameters
+        ----------
+        given_dims: str
+            The native dimension ordering of the image (``self.dims.order``).
+        dim_specs: list
+            One getitem operation per dimension in ``given_dims``, as produced by
+            ``transforms.compute_dim_specs``.
+
+        Returns
+        -------
+        data: np.ndarray
+            The indexed image data in native (reduced) dimension order.
         """
         native_shape = self.shape
         y_index = given_dims.index(DimensionNames.SpatialY)
         cullable_dims = given_dims[:y_index]  # e.g. "TCZ"
         has_samples = DimensionNames.Samples in given_dims
 
-        # Translate the Y/X selections into one on-disk ROI plus a residual
-        # in-window index, so we read only the requested rectangle (not the whole
-        # plane). Samples (BGR) is cropped in memory.
+        # Fetch YX rectangle
         y_start, y_extent, y_residual = self._spatial_window(
             dim_specs[y_index], native_shape[y_index]
         )
@@ -447,8 +473,7 @@ class Reader(BaseReader):
                 plane = {d: idx for (d, (_pos, idx)) in zip(cullable_dims, combo)}
                 raw = file.read(scene=scene, plane=plane, roi=roi)
                 # raw is (Y, X, 1) grayscale or (Y, X, 3) BGR. Drop the trailing
-                # samples axis for grayscale (not np.squeeze, which would also
-                # collapse a length-1 Y or X window).
+                # samples axis for grayscale.
                 result = raw if has_samples else raw[..., 0]
                 cropped = result[window_specs_t]
                 if out is None:
@@ -458,12 +483,8 @@ class Reader(BaseReader):
                 out[out_pos] = cropped
 
         if out is None:
-            # Empty selection along a cullable dim (e.g. C=slice(0, 0)): the read
-            # loop never ran, so one of kept_lengths is 0. Reconstruct the spatial
-            # (Y/X[/S]) extent analytically -- the same shape `cropped` would have
-            # had -- so the result keeps its full dimensionality and finalize_dims
-            # can reorder it. Use the pixel dtype directly (self.dtype would build
-            # the graph).
+            # A dim selected nothing (e.g. C=slice(0, 0)) so the read
+            # loop never ran; build a full-dimensionality empty result.
             spatial_template: Tuple[int, ...] = (y_extent, x_extent)
             if has_samples:
                 spatial_template += (
