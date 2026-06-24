@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, List, Optional, Tuple, Union
 from xml.etree import ElementTree
 
+import numpy as np
 import xarray as xr
 from bioio_base.dimensions import Dimensions
 from bioio_base.exceptions import UnsupportedFileFormatError
@@ -189,6 +190,51 @@ class Reader(BaseReader):
     @property
     def current_scene_index(self) -> int:
         return self._implementation.current_scene_index
+
+    @property
+    def shape(self) -> Tuple[int, ...]:
+        """
+        Shape of the current scene's image array.
+
+        Returns
+        -------
+        shape: Tuple[int, ...]
+            Tuple of the image array's dimensions.
+        """
+        return self._implementation.shape
+
+    @property
+    def dims(self) -> Dimensions:
+        """
+        Dimension names and sizes of the current scene's image array.
+
+        Returns
+        -------
+        dims: Dimensions
+            Object with the paired dimension names and their sizes.
+        """
+        return self._implementation.dims
+
+    def _read_indexed(self, given_dims: str, dim_specs: list) -> np.ndarray:
+        """
+        Return the native-order array with ``dim_specs`` applied. This
+        lets ``get_image_data`` read only the requested sub-region.
+
+
+        Parameters
+        ----------
+        given_dims: str
+            The native dimension ordering of the image (``self.dims.order``).
+        dim_specs: list
+            One getitem operation per dimension in ``given_dims``, as produced by
+            ``transforms.compute_dim_specs``.
+
+        Returns
+        -------
+        data: np.ndarray
+            The indexed image data in native (reduced) dimension order.
+        """
+        return self._implementation._read_indexed(given_dims, dim_specs)
 
     def _read_delayed(self) -> xr.DataArray:
         """

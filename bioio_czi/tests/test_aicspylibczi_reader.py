@@ -876,3 +876,33 @@ def test_get_image_data_reads_only_requested_planes_aics(
     monkeypatch.setattr(AicsPyLibCziReader, "_read_plane", staticmethod(counting_plane))
     reader.get_image_data("ZYX", C=1)
     assert calls["n"] == 5
+
+
+@pytest.mark.parametrize(
+    "filename, order, kwargs",
+    [
+        # Empty selection along a cullable (non-spatial) dim leaves the read loop
+        # with nothing to iterate, exercising the empty-result fallback in
+        # _read_indexed. The result must keep its full spatial dimensionality.
+        ("s_3_t_1_c_3_z_5.czi", "CZYX", {"C": slice(0, 0)}),
+        ("s_3_t_1_c_3_z_5.czi", "CZYX", {"Z": slice(0, 0), "C": 1}),
+        # RGB (has a Samples axis) empty selection along the cullable T dim.
+        ("RGB-8bit.czi", "TYXS", {"T": slice(0, 0)}),
+    ],
+)
+def test_get_image_data_empty_selection_matches_full_slice_aics(
+    filename: str, order: str, kwargs: dict
+) -> None:
+    from bioio_base import transforms
+
+    reader = Reader(
+        LOCAL_RESOURCES_DIR / filename, use_aicspylibczi=True
+    )._implementation
+    expected = transforms.reshape_data(reader.data, reader.dims.order, order, **kwargs)
+    actual = reader.get_image_data(order, **kwargs)
+
+    # An empty selection yields a zero-element array that still carries every
+    # requested axis (one of them with length 0), matching the base path.
+    assert 0 in actual.shape
+    assert actual.shape == expected.shape
+    np.testing.assert_array_equal(actual, expected)

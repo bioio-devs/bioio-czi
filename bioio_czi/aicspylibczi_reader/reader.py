@@ -439,16 +439,71 @@ class Reader(BaseReader):
         # Convert ops and run getitem
         return data[tuple(ops)], real_dims
 
+    @property
+    def dims(self) -> Dimensions:
+        """
+        Dimension names and sizes of the current scene.
+
+        We override here to fetch from CZI metadata directly instead of
+        deriving it from ``xarray_dask_data`` (the base implementation).
+
+        Returns
+        -------
+        dims: Dimensions
+            Object with the paired dimension names and their sizes.
+        """
+        if self._dims is None:
+            order = self.mapped_dims
+            with self._fs.open(self._path) as open_resource:
+                czi = CziFile(open_resource.f)
+                dims_shape = Reader._dims_shape_to_scene_dims_shape(
+                    czi.get_dims_shape(),
+                    self.current_scene_index,
+                    czi.shape_is_consistent,
+                )
+            dims_shape.pop(CZI_BLOCK_DIM_CHAR, None)
+            shape = tuple(dims_shape[_BIOIO_TO_CZI_DIM.get(d, d)][1] for d in order)
+            self._dims = Dimensions(dims=order, shape=shape)
+        return self._dims
+
+    @property
+    def shape(self) -> Tuple[int, ...]:
+        """
+        Shape of the current scene.
+
+        We override here to fetch from CZI metadata directly instead of
+        deriving it from ``xarray_dask_data`` (the base implementation).
+
+        Returns
+        -------
+        shape: Tuple[int, ...]
+            Tuple of the image array's dimensions.
+        """
+        return self.dims.shape
+
     def _read_indexed(self, given_dims: str, dim_specs: list) -> np.ndarray:
         """
-        Read only the requested non-spatial planes for ``get_image_data``.
+        Return the native-order array with ``dim_specs`` applied.
 
-        Cullable dims (everything except Y, X, Samples) are read one plane at a
-        time via ``read_image``, which reads only the requested sub-blocks at the
-        libCZI level. Spatial dims (Y, X, Samples) are read in full and cropped in
-        memory via ``plane_specs``. The result matches
-        ``self.data[tuple(dim_specs)]`` — integer specs drop their axis.
+        This lets ``get_image_data`` read only the requested sub-region. It
+        reads each plane one at a time via ``_read_plane`` (which fetches only
+        the requested sub-blocks at the libCZI level), then crops the
+        Y/X/Samples selection in memory.
+
+        Parameters
+        ----------
+        given_dims: str
+            The native dimension ordering of the image (``self.dims.order``).
+        dim_specs: list
+            One getitem operation per dimension in ``given_dims``, as produced by
+            ``transforms.compute_dim_specs``.
+
+        Returns
+        -------
+        data: np.ndarray
+            The indexed image data in native (reduced) dimension order.
         """
+        native_shape = self.shape
         spatial = (
             DimensionNames.SpatialY,
             DimensionNames.SpatialX,
@@ -466,6 +521,11 @@ class Reader(BaseReader):
                 self.current_scene_index,
                 czi.shape_is_consistent,
             )
+            pixel_type = PIXEL_DICT.get(czi.pixel_type)
+            if pixel_type is None:
+                raise TypeError(
+                    f"Unsupported or unlabeled pixel type: {czi.pixel_type!r}"
+                )
 
             # Resolve each cullable dim to (czi_char, [(out_pos|None, abs_idx)...]).
             # read_image wants absolute CZI indices: begin + position.
@@ -474,7 +534,7 @@ class Reader(BaseReader):
             for i, d in cullable:
                 czi_char = _BIOIO_TO_CZI_DIM.get(d, d)
                 begin = dims_shape[czi_char][0]
-                size_i = self.shape[i]
+                size_i = native_shape[i]
                 spec = dim_specs[i]
                 if isinstance(spec, slice):
                     idxs = list(range(*spec.indices(size_i)))
@@ -507,8 +567,13 @@ class Reader(BaseReader):
                 out[out_pos] = cropped
 
         if out is None:
-            # Empty selection along a kept dim; build a correctly-shaped empty.
-            out = np.empty(tuple(kept_lengths), dtype=self.dtype)
+            # A dim selected nothing (e.g. C=slice(0, 0)) so the read
+            # loop never ran; build a full-dimensionality empty result.
+            spatial_full = tuple(
+                native_shape[i] for i, d in enumerate(given_dims) if d in spatial
+            )
+            spatial_shape = np.empty(spatial_full)[plane_specs].shape
+            out = np.empty(tuple(kept_lengths) + spatial_shape, dtype=pixel_type)
         return out
 
     def _create_dask_array(self, czi: CziFile) -> xr.DataArray:
@@ -626,7 +691,9 @@ class Reader(BaseReader):
             # Get pixel type and catch unsupported
             pixel_type = PIXEL_DICT.get(czi.pixel_type)
             if pixel_type is None:
-                raise TypeError(f"Pixel type: {czi.pixel_type} is not supported.")
+                raise TypeError(
+                    f"Unsupported or unlabeled pixel type: {czi.pixel_type!r}"
+                )
 
             # Add delayed array to lazy arrays at index
             lazy_arrays[np_index] = da.from_delayed(

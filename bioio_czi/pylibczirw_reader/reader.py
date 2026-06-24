@@ -3,7 +3,16 @@
 
 import itertools
 import logging
-from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    ContextManager,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    Union,
+)
 from xml.etree import ElementTree as ET
 
 import dask.array as da
@@ -292,25 +301,158 @@ class Reader(BaseReader):
         czi_scene_index = self._get_czi_scene_index()
         return czi_scene_index, self._scenes_bounding_rectangle[czi_scene_index]
 
+    @property
+    def dims(self) -> Dimensions:
+        """
+        Dimension names and sizes of the current scene.
+
+        We override here to fetch from CZI metadata directly instead of
+        deriving it from ``xarray_dask_data`` (the base implementation).
+
+        Returns
+        -------
+        dims: Dimensions
+            Object with the paired dimension names and their sizes.
+        """
+        if self._dims is None:
+            dim_bounds = dict(self._total_bounding_box)
+            if len(self._scenes_bounding_rectangle) > 0:
+                rect = self._scenes_bounding_rectangle[self._get_czi_scene_index()]
+                dim_bounds[DimensionNames.SpatialX] = (rect.x, rect.x + rect.w)
+                dim_bounds[DimensionNames.SpatialY] = (rect.y, rect.y + rect.h)
+
+            coords = self._get_coords(
+                self.metadata, self._get_czi_scene_index(), dim_bounds
+            )
+            ordered_dims = [
+                d
+                for d in DEFAULT_DIMENSION_ORDER_LIST
+                if d in coords or size(self._total_bounding_box, d) > 1
+            ]
+            assert ordered_dims[-2:] == [
+                DimensionNames.SpatialY,
+                DimensionNames.SpatialX,
+            ]
+            shape = tuple(
+                len(coords[d]) if d in coords else size(self._total_bounding_box, d)
+                for d in ordered_dims
+            )
+            if "Bgr" in self._pixel_types[0]:
+                ordered_dims = ordered_dims + [DimensionNames.Samples]
+                shape = shape + (3,)
+            self._dims = Dimensions(dims="".join(ordered_dims), shape=shape)
+        return self._dims
+
+    @property
+    def shape(self) -> Tuple[int, ...]:
+        """
+        Shape of the current scene.
+
+        We override here to fetch from CZI metadata directly instead of
+        deriving it from ``xarray_dask_data`` (the base implementation).
+
+        Returns
+        -------
+        shape: Tuple[int, ...]
+            Tuple of the image array's dimensions.
+        """
+        return self.dims.shape
+
+    @staticmethod
+    def _spatial_window(
+        spec: Union[int, slice, list], size: int
+    ) -> Tuple[int, int, Any]:
+        """
+        pylibCZIrw reads pixels off disk as a single contiguous rectangle (an
+        ROI), but a caller can select this axis with an int, a slice (possibly
+        strided), or a list of indices -- none of which an ROI expresses
+        directly. So we split the selection into two pieces:
+
+        - ``(start, extent)``: the smallest contiguous range covering everything
+          the caller asked for. This is the ROI we actually read off disk.
+        - ``residual``: the index then applied to that read window, in memory, to
+          recover the exact selection -- drop the axis (int), re-apply the stride
+          (strided slice), or pick out the listed positions (list).
+
+        Reading the bounding range and re-indexing keeps disk reads small while
+        still honoring selections an ROI alone cannot express.
+
+        Returns ``(start, extent, residual)`` for the given ``spec`` and axis
+        ``size``.
+        """
+        if isinstance(spec, (int, np.integer)):
+            k = int(spec) % size
+            return k, 1, 0
+        if isinstance(spec, slice):
+            start, stop, step = spec.indices(size)
+            extent = max(stop - start, 0)
+            if step == 1:
+                return start, extent, slice(None)
+            return start, extent, slice(0, extent, step)
+        if isinstance(spec, list):
+            idxs = [j % size for j in spec]
+            lo, hi = min(idxs), max(idxs)
+            return lo, hi - lo + 1, [j - lo for j in idxs]
+        raise TypeError(
+            f"Spatial selection must be int, slice, or list, got "
+            f"{type(spec).__name__}."
+        )
+
     def _read_indexed(self, given_dims: str, dim_specs: list) -> np.ndarray:
         """
-        Read only the requested non-spatial planes for ``get_image_data``.
+        Return the native-order array with ``dim_specs`` applied.
 
-        Cullable dims (everything before Y: T/C/Z/M/...) are read one plane at a
-        time; spatial dims (Y, X, and Samples for BGR) are read whole-plane and
-        cropped in memory via ``plane_specs``. The result matches
-        ``self.data[tuple(dim_specs)]`` — integer specs drop their axis.
+        This lets ``get_image_data`` read only the requested sub-region. It
+        reads each plane one at a time and translates the Y/X selection into a
+        single ROI, so only the requested area is read off disk.
+
+        Parameters
+        ----------
+        given_dims: str
+            The native dimension ordering of the image (``self.dims.order``).
+        dim_specs: list
+            One getitem operation per dimension in ``given_dims``, as produced by
+            ``transforms.compute_dim_specs``.
+
+        Returns
+        -------
+        data: np.ndarray
+            The indexed image data in native (reduced) dimension order.
         """
+        native_shape = self.shape
         y_index = given_dims.index(DimensionNames.SpatialY)
         cullable_dims = given_dims[:y_index]  # e.g. "TCZ"
-        plane_specs = tuple(dim_specs[y_index:])  # Y, X, and Samples (BGR)
+        has_samples = DimensionNames.Samples in given_dims
+
+        # Fetch YX rectangle
+        y_start, y_extent, y_residual = self._spatial_window(
+            dim_specs[y_index], native_shape[y_index]
+        )
+        x_start, x_extent, x_residual = self._spatial_window(
+            dim_specs[y_index + 1], native_shape[y_index + 1]
+        )
+        window_specs: List[Any] = [y_residual, x_residual]
+        if has_samples:
+            window_specs.append(dim_specs[y_index + 2])  # Samples spec
+        window_specs_t = tuple(window_specs)
+
+        # XY origin: per-scene for scened files, total bounding box otherwise.
+        if len(self._scenes_bounding_rectangle) == 0:
+            scene: Optional[int] = None
+            base_x = self._total_bounding_box[DimensionNames.SpatialX][0]
+            base_y = self._total_bounding_box[DimensionNames.SpatialY][0]
+        else:
+            scene = self._get_czi_scene_index()
+            rect = self._scenes_bounding_rectangle[scene]
+            base_x, base_y = rect.x, rect.y
+        roi = (base_x + x_start, base_y + y_start, x_extent, y_extent)
 
         # Resolve each cullable dim to (out_pos | None, plane_index) tuples.
         # out_pos is None for fixed (integer) dims whose axis is dropped.
         enumerated: List[list] = []
         for i, _dim in enumerate(cullable_dims):
             spec = dim_specs[i]
-            size_i = self.shape[i]
+            size_i = native_shape[i]
             if isinstance(spec, slice):
                 enumerated.append(list(enumerate(range(*spec.indices(size_i)))))
             elif isinstance(spec, list):
@@ -324,14 +466,16 @@ class Reader(BaseReader):
             if not isinstance(spec, (int, np.integer))
         ]
 
-        scene, roi = self._current_scene_roi()
         out: Optional[np.ndarray] = None
         with open(self._path) as file:
             for combo in itertools.product(*enumerated):
                 out_pos = tuple(pos for pos, _idx in combo if pos is not None)
                 plane = {d: idx for (d, (_pos, idx)) in zip(cullable_dims, combo)}
-                result = np.squeeze(file.read(scene=scene, plane=plane, roi=roi))
-                cropped = result[plane_specs]
+                raw = file.read(scene=scene, plane=plane, roi=roi)
+                # raw is (Y, X, 1) grayscale or (Y, X, 3) BGR. Drop the trailing
+                # samples axis for grayscale.
+                result = raw if has_samples else raw[..., 0]
+                cropped = result[window_specs_t]
                 if out is None:
                     out = np.empty(
                         tuple(kept_lengths) + cropped.shape, dtype=cropped.dtype
@@ -339,8 +483,18 @@ class Reader(BaseReader):
                 out[out_pos] = cropped
 
         if out is None:
-            # Empty selection along a kept dim; build a correctly-shaped empty.
-            out = np.empty(tuple(kept_lengths), dtype=self.dtype)
+            # A dim selected nothing (e.g. C=slice(0, 0)) so the read
+            # loop never ran; build a full-dimensionality empty result.
+            spatial_template: Tuple[int, ...] = (y_extent, x_extent)
+            if has_samples:
+                spatial_template += (
+                    native_shape[given_dims.index(DimensionNames.Samples)],
+                )
+            spatial_shape = np.empty(spatial_template)[window_specs_t].shape
+            out = np.empty(
+                tuple(kept_lengths) + spatial_shape,
+                dtype=PIXEL_DICT[self._pixel_types[0].lower()],
+            )
         return out
 
     def _read_delayed(self) -> xr.DataArray:
