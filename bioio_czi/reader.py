@@ -1,6 +1,7 @@
 # Support use of type Reader inside definition of Reader
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any, List, Optional, Tuple, Union
@@ -8,19 +9,24 @@ from xml.etree import ElementTree
 
 import numpy as np
 import xarray as xr
-from bioio_base.dimensions import Dimensions
+from bioio_base import standard_metadata as base_standard_metadata
+from bioio_base.dimensions import DimensionNames, Dimensions
 from bioio_base.exceptions import UnsupportedFileFormatError
 from bioio_base.reader import Reader as BaseReader
-from bioio_base.standard_metadata import StandardMetadata
+from bioio_base.standard_metadata import ChannelMetadata, StandardMetadata
 from bioio_base.types import PathLike, PhysicalPixelSizes, TimeInterval
 from fsspec import AbstractFileSystem
 from ome_types.model import OME
 
+from bioio_czi import channels as channels_module
 from bioio_czi import standard_metadata
 from bioio_czi.aicspylibczi_reader.reader import Reader as AicsPyLibCziReader
+from bioio_czi.bounding_box import size
 from bioio_czi.pylibczirw_reader.reader import Reader as PylibCziReader
 
 from . import metadata
+
+log = logging.getLogger(__name__)
 
 
 class Reader(BaseReader):
@@ -514,6 +520,130 @@ class Reader(BaseReader):
         return self._implementation.time_interval
 
     @property
+    def channel_metadata(self) -> List[ChannelMetadata]:
+        """
+        Per-channel acquisition metadata for the current scene.
+
+        Returns
+        -------
+        List[ChannelMetadata]
+            One entry per channel in the current scene. Empty if the file has no
+            channel metadata.
+        """
+        xml = self.metadata
+        channels_element = channels_module.channels_element(
+            xml, self._implementation.czi_scene_index
+        )
+        if channels_element is None:
+            return []
+
+        channels = channels_element.findall("./Channel")
+        # Bound the channel count by the data's channel dimension.
+        dims = self.dims
+        dims_shape = {dim: (0, getattr(dims, dim)) for dim in dims.order}
+        number_of_channels = size(dims_shape, DimensionNames.Channel)
+        if len(channels) > number_of_channels:
+            log.warning(
+                "More channels in metadata than in data "
+                f"({len(channels)} vs. {number_of_channels})"
+            )
+
+        # These maps are built once and reused for every channel in the loop.
+        text = channels_module.element_text
+        detector_names = channels_module.build_id_name_map(
+            xml, ".//Instrument/Detectors/Detector"
+        )
+        detector_adapters = channels_module.build_detector_adapter_map(xml)
+        light_source_names = channels_module.build_id_name_map(
+            xml, ".//Instrument/LightSources/LightSource"
+        )
+        track_by_channel = channels_module.build_track_map(xml)
+        dye_names = channels_module.build_dye_name_map(xml)
+        scan_direction = channels_module.scan_direction(xml)
+
+        results: List[ChannelMetadata] = []
+        for channel in channels[:number_of_channels]:
+            channel_id = channel.get("Id")
+
+            detector = channel.find("./DetectorSettings/Detector")
+            detector_id = detector.get("Id") if detector is not None else None
+            imaging_device = (
+                detector_names.get(detector_id, detector_id)
+                if detector_id is not None
+                else None
+            )
+            camera_adapter = (
+                detector_adapters.get(detector_id) if detector_id is not None else None
+            )
+
+            intensity, light_source = channels_module.light_sources(
+                channel, light_source_names
+            )
+
+            # Prefer the dedicated display-settings dye name; fall back to Fluor.
+            dye_name = dye_names.get(channel_id) if channel_id else None
+            if dye_name is None:
+                dye_name = text(channel.find("Fluor"))
+
+            results.append(
+                ChannelMetadata(
+                    channel_id=channel_id,
+                    name=channel.get("Name"),
+                    track=track_by_channel.get(channel_id) if channel_id else None,
+                    dye_name=dye_name,
+                    channel_color=text(channel.find("Color")),
+                    contrast_method=text(channel.find("ContrastMethod")),
+                    illumination_wavelength=(
+                        channels_module.illumination_wavelength(channel)
+                    ),
+                    scan_direction=scan_direction,
+                    excitation_wavelength=text(channel.find("ExcitationWavelength")),
+                    emission_wavelength=text(channel.find("EmissionWavelength")),
+                    effective_na=text(channel.find("EffectiveNA")),
+                    exposure_time=text(channel.find("ExposureTime")),
+                    imaging_device=imaging_device,
+                    camera_adapter=camera_adapter,
+                    section_thickness=text(channel.find("SectionThickness")),
+                    light_source_intensity=intensity,
+                    light_source=light_source,
+                )
+            )
+        return results
+
+    @property
+    def reflectors(self) -> Optional[List[str]]:
+        """
+        Names of the reflectors installed on the microscope's turret.
+        """
+        names: List[str] = []
+        for reflector in self.metadata.findall(".//ChangerElements/Reflector"):
+            name = reflector.get("Name")
+            if name:
+                names.append(name)
+        return names or None
+
+    @property
+    def acquisition_start(self) -> Optional[datetime]:
+        """
+        The true start of acquisition for the current scene.
+
+        Returns
+        -------
+        Optional[datetime]
+            The earliest acquisition time, or None if unavailable.
+        """
+        acquisition_times = self.acquisition_times
+        if acquisition_times:
+            times: List[datetime] = []
+            for entry in acquisition_times:
+                value = entry.get("acquisition_time")
+                if isinstance(value, datetime):
+                    times.append(value)
+            if times:
+                return min(times)
+        return base_standard_metadata.imaging_datetime(self.ome_metadata)
+
+    @property
     def standard_metadata(self) -> StandardMetadata:
         """
         Return the standard metadata for this reader, updating specific fields.
@@ -532,6 +662,11 @@ class Reader(BaseReader):
         metadata.column = standard_metadata.column(self.metadata, czi_scene_index)
         metadata.position_index = standard_metadata.position_index(self.current_scene)
         metadata.row = standard_metadata.row(self.metadata, czi_scene_index)
+        metadata.channels = self.channel_metadata
+        metadata.reflectors = self.reflectors
+
+        # Prefer the true acquisition start
+        metadata.imaging_datetime = self.acquisition_start
 
         # 3. Finally, total_time_duration is mode-specific, as only aicspylibczi mode
         # has access to the necessary subblock metadata.
