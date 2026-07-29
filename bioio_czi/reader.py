@@ -532,7 +532,9 @@ class Reader(BaseReader):
         metadata.column = standard_metadata.column(self.metadata, czi_scene_index)
         metadata.position_index = standard_metadata.position_index(self.current_scene)
         metadata.row = standard_metadata.row(self.metadata, czi_scene_index)
-
+        metadata.stage_position_x, metadata.stage_position_y = (
+            standard_metadata.scene_stage_position(self.metadata, czi_scene_index)
+        )
         # 3. Finally, total_time_duration is mode-specific, as only aicspylibczi mode
         # has access to the necessary subblock metadata.
         metadata.timelapse_interval = self.time_interval

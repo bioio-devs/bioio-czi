@@ -38,6 +38,8 @@ from .conftest import LOCAL_RESOURCES_DIR
                 "Pixel Size Z": 2.23,
                 "Position Index": 1,
                 "Row": "4",
+                "Stage Position X": 32056.045,
+                "Stage Position Y": 31179.085,
                 "Timelapse": True,
                 "Timelapse Interval": datetime.timedelta(milliseconds=59927.0),
                 "Total Time Duration": datetime.timedelta(milliseconds=59927.0),
@@ -65,6 +67,8 @@ from .conftest import LOCAL_RESOURCES_DIR
                 "Pixel Size Z": None,
                 "Position Index": None,
                 "Row": None,
+                "Stage Position X": 43832.037,
+                "Stage Position Y": 14634.984,
                 "Timelapse": False,
                 "Timelapse Interval": None,
                 "Total Time Duration": None,
@@ -119,6 +123,8 @@ from .conftest import LOCAL_RESOURCES_DIR
                 "Pixel Size Z": 2.23,
                 "Position Index": 1,
                 "Row": "4",
+                "Stage Position X": 32056.045,
+                "Stage Position Y": 31179.085,
                 "Timelapse": True,
                 "Timelapse Interval": None,  # Available only in aicspylibczi mode
                 "Total Time Duration": None,  # Available only in aicspylibczi mode
@@ -148,6 +154,8 @@ from .conftest import LOCAL_RESOURCES_DIR
                 "Pixel Size Z": None,
                 "Position Index": None,
                 "Row": None,
+                "Stage Position X": 43832.037,
+                "Stage Position Y": 14634.984,
                 "Timelapse": False,
                 "Timelapse Interval": None,  # Available only in aicspylibczi mode
                 "Total Time Duration": None,  # Available only in aicspylibczi mode

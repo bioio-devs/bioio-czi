@@ -83,3 +83,35 @@ def row(metadata: Element, current_scene_index: int) -> Optional[str]:
         The row index as a string. Returns None if not found.
     """
     return _row_or_column(metadata, current_scene_index, "row")
+
+
+def scene_stage_position(
+    metadata: Element, current_scene_index: int
+) -> tuple[Optional[float], Optional[float]]:
+    """
+    Extracts the stage center position for the current scene from the CZI XML.
+
+    Returns
+    -------
+    tuple[Optional[float], Optional[float]]
+        (stage_x, stage_y) in microns, or (None, None) if not found.
+    """
+    try:
+        scenes = metadata.findall(
+            "Metadata/Information/Image/Dimensions/S/Scenes/Scene"
+        )
+        for scene in scenes:
+            scene_index = scene.get("Index")
+            if scene_index is not None and int(scene_index) == current_scene_index:
+                center = scene.find("CenterPosition")
+                if center is not None and center.text:
+                    x_str, y_str = center.text.split(",")
+                    return float(x_str), float(y_str)
+    except Exception as exc:
+        log.warning(
+            "Failed to extract stage position for scene %s: %s",
+            current_scene_index,
+            exc,
+            exc_info=True,
+        )
+    return None, None
