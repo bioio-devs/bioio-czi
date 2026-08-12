@@ -1,11 +1,14 @@
+import contextlib
 import xml.etree.ElementTree as ET
-from typing import List, Tuple
+from typing import Any, ContextManager, List, Tuple
 
 import numpy as np
 import pytest
 from bioio_base import dimensions, exceptions, test_utilities
+from pylibCZIrw import czi
 
 from bioio_czi import Reader
+from bioio_czi.pylibczirw_reader import reader as pylibczirw_reader
 
 from .conftest import LOCAL_RESOURCES_DIR
 
@@ -199,6 +202,58 @@ def test_czi_reader_remote(url: str, expected_shape: Tuple[int]) -> None:
     # Construct full filepath
     reader = Reader(url)
     assert reader.shape == expected_shape
+
+    # Pixels come back too, without the whole 5684x5925 image crossing the network:
+    # libCZI asks for the byte ranges covering the requested window.
+    window = reader.get_image_data("YX", Y=slice(0, 32), X=slice(0, 32))
+    assert window.shape == (32, 32)
+    assert window.dtype == np.uint16
+
+
+def test_open_presigns_object_store_uris(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Object-store URIs cannot be handed to libCZI directly, so they are presigned
+    # into an https URL first and then read over the same curl stream as any URL.
+    # Both halves are faked here so the test needs no credentials and no network.
+    opened: List[Tuple[str, Tuple[Any, ...]]] = []
+
+    def fake_resolve_url(image: str, **kwargs: Any) -> str:
+        assert image == "s3://bucket/prefix/image.czi"
+        return "https://bucket.s3.amazonaws.com/prefix/image.czi?signature=abc"
+
+    def fake_open_czi(filepath: str, *args: Any) -> ContextManager[Any]:
+        opened.append((filepath, args))
+        return contextlib.nullcontext("czi-reader")
+
+    monkeypatch.setattr(pylibczirw_reader.remote, "resolve_url", fake_resolve_url)
+    monkeypatch.setattr(pylibczirw_reader.czi, "open_czi", fake_open_czi)
+
+    with pylibczirw_reader.open("s3://bucket/prefix/image.czi"):
+        pass
+
+    assert opened == [
+        (
+            "https://bucket.s3.amazonaws.com/prefix/image.czi?signature=abc",
+            (czi.ReaderFileInputTypes.Curl,),
+        )
+    ]
+
+
+def test_open_reads_local_paths_off_disk(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The counterpart to the test above: a local path must not be routed through
+    # the curl stream, which would turn a plain file read into a failed URL fetch.
+    opened: List[Tuple[str, Tuple[Any, ...]]] = []
+
+    def fake_open_czi(filepath: str, *args: Any) -> ContextManager[Any]:
+        opened.append((filepath, args))
+        return contextlib.nullcontext("czi-reader")
+
+    monkeypatch.setattr(pylibczirw_reader.czi, "open_czi", fake_open_czi)
+
+    path = str(LOCAL_RESOURCES_DIR / "s_1_t_1_c_1_z_1.czi")
+    with pylibczirw_reader.open(path):
+        pass
+
+    assert opened == [(path, ())]
 
 
 @pytest.mark.parametrize(

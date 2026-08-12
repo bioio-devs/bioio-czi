@@ -1,10 +1,12 @@
 import itertools
 import logging
 import xml.etree.ElementTree as ET
+from contextlib import contextmanager
 from copy import copy
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, Hashable, List, Optional, Tuple, Union
+from typing import Any, Dict, Hashable, Iterator, List, Optional, Tuple, Union
 
 import dask.array as da
 import numpy as np
@@ -26,14 +28,27 @@ from fsspec.implementations.local import LocalFileSystem
 from fsspec.spec import AbstractFileSystem
 
 from .. import metadata as metadata_utils
+from .. import remote
 from ..bounding_box import size
 from ..channels import get_channel_names
 from ..pixel_sizes import get_physical_pixel_sizes
 from .subblock_metadata import acquisition_times, time_between_subblocks
 
+try:
+    from aicspylibczi import remote_reads_available
+except ImportError:
+    # aicspylibczi releases before remote read support have no way to read over the
+    # network at all. Reporting that here, rather than failing to import, keeps this
+    # plugin working on older aicspylibczi for the local reads it can still do.
+    def remote_reads_available() -> bool:  # type: ignore[misc]
+        return False
+
+
 ###############################################################################
 
 log = logging.getLogger(__name__)
+
+READER_NAME = "bioio-czi[aicspylibczi mode]"
 
 ###############################################################################
 
@@ -60,6 +75,128 @@ PIXEL_DICT = {
 }
 
 
+@dataclass
+class CziSource:
+    """
+    Everything needed to open one CZI, wherever it lives.
+
+    aicspylibczi holds no file handle between calls, so the reader reopens the CZI
+    for each piece of work it does. This bundles the "how to reopen it" details so
+    they travel together, including into dask graphs -- which is why it stores a
+    filesystem and a path rather than an open handle.
+
+    Remote sources are re-signed on every open rather than caching a URL, so a dask
+    graph that runs long after the reader was constructed cannot trip over an
+    expired signature. For object stores this is local HMAC work, not a round trip.
+
+    Parameters
+    ----------
+    fs: AbstractFileSystem
+        The filesystem holding the image.
+    path: str
+        The protocol-stripped path within ``fs``, e.g. "bucket/key" for
+        "s3://bucket/key".
+    uri: str
+        The image location with its protocol intact. Presigning needs this, because
+        ``path`` has had the protocol stripped off by fsspec.
+    stream_options: Optional[Dict[str, Any]]
+        libCZI stream options, e.g. ``{"timeout": 30}``. Remote sources only.
+        Default: None
+    url_expiration: int
+        Seconds a generated presigned URL stays valid.
+        Default: remote.DEFAULT_URL_EXPIRATION_SECONDS
+    """
+
+    fs: AbstractFileSystem
+    path: str
+    uri: str
+    stream_options: Optional[Dict[str, Any]] = None
+    url_expiration: int = remote.DEFAULT_URL_EXPIRATION_SECONDS
+
+    @classmethod
+    def from_fs(
+        cls,
+        fs: AbstractFileSystem,
+        path: str,
+        **kwargs: Any,
+    ) -> "CziSource":
+        """
+        Build a source from the ``(fs, path)`` pair BioIO readers are handed.
+
+        The protocol is put back onto ``path`` so that object-store paths can be
+        presigned later. Local paths are left alone rather than turned into
+        ``file://`` URIs.
+        """
+        if isinstance(fs, LocalFileSystem) or remote.uri_scheme(path):
+            # A path that still carries its scheme -- which is what fsspec hands
+            # back for http(s) -- is already a URI. Putting the protocol back on
+            # anyway would double it up, e.g. "https://http://host/a.czi".
+            uri = path
+        else:
+            uri = fs.unstrip_protocol(path)
+        return cls(fs=fs, path=path, uri=uri, **kwargs)
+
+    @property
+    def is_remote(self) -> bool:
+        """
+        Whether this CZI is read over the network rather than off local disk.
+        """
+        return remote.is_remote(self.uri)
+
+    @contextmanager
+    def open(self) -> Iterator[CziFile]:
+        """
+        Open the CZI, yielding a ``CziFile`` for the duration of the block.
+
+        Raises
+        ------
+        exceptions.UnsupportedFileFormatError
+            The image is remote but this aicspylibczi build cannot read remote
+            files, or its protocol cannot be turned into an http(s) URL.
+        """
+        if self.is_remote:
+            require_remote_reads(self.uri)
+            if remote.is_http_url(self.uri):
+                url = self.uri
+            else:
+                # Reuse the filesystem the reader already built rather than
+                # reconstructing it (and its credentials) on every open.
+                url = remote.sign_url(
+                    self.fs,
+                    self.path,
+                    uri=self.uri,
+                    reader_name=READER_NAME,
+                    expiration=self.url_expiration,
+                )
+            yield CziFile(url, stream_options=self.stream_options or None)
+        else:
+            with self.fs.open(self.path) as open_resource:
+                yield CziFile(open_resource.f)
+
+
+def require_remote_reads(uri: str) -> None:
+    """
+    Raise unless this aicspylibczi installation can read CZIs over http(s).
+
+    Remote reads need libCZI's curl-based stream, which is a build-time option in
+    aicspylibczi, so a working import is not enough to know they are available.
+
+    Raises
+    ------
+    exceptions.UnsupportedFileFormatError
+        This build was compiled without the curl stream.
+    """
+    if not remote_reads_available():
+        raise exceptions.UnsupportedFileFormatError(
+            READER_NAME,
+            uri,
+            "This aicspylibczi build was compiled without libCZI's curl stream, so "
+            "it cannot read CZIs over the network. Reinstall aicspylibczi from a "
+            "wheel built with remote support, or drop use_aicspylibczi to read this "
+            "image in pylibczirw mode.",
+        )
+
+
 class Reader(BaseReader):
     """
     Wraps the aicspylibczi API to provide the same BioIO Reader plugin for
@@ -67,7 +204,7 @@ class Reader(BaseReader):
 
     Notes
     -----
-    To use this reader, install with: `pip install aicspylibczi>=3.1.1`.
+    To use this reader, install with: `pip install aicspylibczi>=3.3.1`.
     """
 
     NAME = "bioio-czi-aicspylibczi"
@@ -84,23 +221,31 @@ class Reader(BaseReader):
     # they may not need to be used by your reader (i.e. input param is an array)
     _fs: "AbstractFileSystem"
     _path: str
+    # How to reopen the image; see CziSource. _fs and _path are kept alongside it
+    # because BioIO (and its test utilities) expect every reader to expose them.
+    _source: CziSource
 
     @staticmethod
     def _is_supported_image(fs: AbstractFileSystem, path: str, **kwargs: Any) -> bool:
-        if not isinstance(fs, LocalFileSystem):
-            raise exceptions.UnsupportedFileFormatError(
-                "bioio-czi[aicspylibczi mode]",
-                path,
-                "Try not setting use_aicspylibczi?",
-            )
+        source = CziSource.from_fs(
+            fs,
+            path,
+            stream_options=kwargs.get("stream_options"),
+        )
         try:
-            with fs.open(path) as open_resource:
-                CziFile(open_resource.f)
+            with source.open():
                 return True
-        except RuntimeError as e:
+        except exceptions.UnsupportedFileFormatError:
+            # Already explains itself, e.g. a protocol that cannot be presigned.
+            raise
+        except (RuntimeError, OSError) as e:
+            # libCZI reports an unreadable file as a RuntimeError. Reading over the
+            # network adds connection and HTTP failures on top, which arrive as
+            # OSError, and mean "could not fetch" rather than "not a CZI" -- but
+            # either way this reader cannot open the image.
             raise exceptions.UnsupportedFileFormatError(
-                "bioio-czi[aicspylibczi mode]",
-                path,
+                READER_NAME,
+                source.uri,
                 str(e),
             )
 
@@ -110,12 +255,16 @@ class Reader(BaseReader):
         chunk_dims: Union[str, List[str]] = DEFAULT_CHUNK_DIMS,
         include_subblock_metadata: bool = False,
         fs_kwargs: Dict[str, Any] = {},
+        stream_options: Optional[Dict[str, Any]] = None,
+        url_expiration: int = remote.DEFAULT_URL_EXPIRATION_SECONDS,
     ):
         """
         Parameters
         ----------
         image: types.PathLike
-            Path to image file to construct Reader for.
+            Path to image file to construct Reader for. May be a local path, an
+            http(s) URL, or an object-store URI such as "s3://bucket/key". See the
+            Notes section for how remote images are read.
         chunk_dims: Union[str, List[str]]
             Which dimensions to create chunks for.
             Default: DEFAULT_CHUNK_DIMS
@@ -128,6 +277,25 @@ class Reader(BaseReader):
         fs_kwargs: Dict[str, Any]
             Any specific keyword arguments to pass to the fsspec-created filesystem.
             Default: {}
+        stream_options: Optional[Dict[str, Any]]
+            libCZI stream options for remote images, e.g. ``{"timeout": 60}`` or
+            ``{"xoauth2_bearer": token}``. Ignored for local images.
+            Default: None
+        url_expiration: int
+            How long, in seconds, a presigned URL generated for an object-store
+            image stays valid. Only relevant for protocols that must be presigned,
+            e.g. "s3://". Reads are issued for as long as this reader (and any dask
+            graph built from it) is in use, so this needs to outlast a read session.
+            Default: remote.DEFAULT_URL_EXPIRATION_SECONDS
+
+        Notes
+        -----
+        Remote images are read by libCZI's curl-based stream, which fetches only the
+        byte ranges it needs rather than downloading the whole file. Protocols other
+        than http(s) are presigned into an https URL by their fsspec filesystem, so
+        credentials are resolved by fsspec in the usual way and never handed to
+        libCZI. This requires an aicspylibczi built with remote support; see
+        :func:`require_remote_reads`.
         """
         # Expand details of provided image
         self._fs, self._path = io_utils.pathlike_to_fs(
@@ -136,13 +304,12 @@ class Reader(BaseReader):
             fs_kwargs=fs_kwargs,
         )
 
-        # Catch non-local file system
-        if not isinstance(self._fs, LocalFileSystem):
-            raise exceptions.UnsupportedFileFormatError(
-                "bioio-czi[aicspylibczi mode]",
-                self._path,
-                "Try not setting use_aicspylibczi?",
-            )
+        self._source = CziSource.from_fs(
+            self._fs,
+            self._path,
+            stream_options=stream_options,
+            url_expiration=url_expiration,
+        )
 
         # Store params
         if isinstance(chunk_dims, str):
@@ -158,7 +325,9 @@ class Reader(BaseReader):
         self._czi_scene_index: Optional[int] = None
 
         # Enforce valid image
-        if not self._is_supported_image(self._fs, self._path):
+        if not self._is_supported_image(
+            self._fs, self._path, stream_options=stream_options
+        ):
             raise exceptions.UnsupportedFileFormatError(
                 self.__class__.__name__, self._path
             )
@@ -166,8 +335,7 @@ class Reader(BaseReader):
     @property
     def mapped_dims(self) -> str:
         if self._mapped_dims is None:
-            with self._fs.open(self._path) as open_resource:
-                czi = CziFile(open_resource.f)
+            with self._source.open() as czi:
                 self._mapped_dims = Reader._fix_czi_dims(czi.dims)
 
         return self._mapped_dims
@@ -197,8 +365,7 @@ class Reader(BaseReader):
             Tuple[str, ...]: Scene names/id
         """
         if self._scenes is None:
-            with self._fs.open(self._path) as open_resource:
-                czi = CziFile(open_resource.f)
+            with self._source.open() as czi:
                 xpath_str = "./Metadata/Information/Image/Dimensions/S/Scenes/Scene"
                 meta_scenes = czi.meta.findall(xpath_str)
                 scene_names: List[str] = []
@@ -333,19 +500,17 @@ class Reader(BaseReader):
 
     @staticmethod
     def _read_chunk_from_image(
-        fs: AbstractFileSystem,
-        path: str,
+        source: CziSource,
         scene: int,
         read_dims: Optional[Dict[str, int]] = None,
     ) -> np.ndarray:
-        return Reader._get_image_data(
-            fs=fs, path=path, scene=scene, read_dims=read_dims
-        )[0]
+        return Reader._get_image_data(source=source, scene=scene, read_dims=read_dims)[
+            0
+        ]
 
     @staticmethod
     def _get_image_data(
-        fs: AbstractFileSystem,
-        path: str,
+        source: CziSource,
         scene: int,
         read_dims: Optional[Dict[str, int]] = None,
     ) -> Tuple[np.ndarray, List[Tuple[str, int]]]:
@@ -355,10 +520,8 @@ class Reader(BaseReader):
 
         Parameters
         ----------
-        fs: AbstractFileSystem
-            The file system to use for reading.
-        path: str
-            The path to the file to read.
+        source: CziSource
+            Where the image lives and how to reopen it.
         scene: int
             The scene index to pull the chunk from.
         read_dims: Optional[Dict[str, int]]
@@ -373,8 +536,7 @@ class Reader(BaseReader):
             The dimension sizes that were returned from the read.
         """
         # Init czi and delegate to the shared single-plane read.
-        with fs.open(path) as open_resource:
-            czi = CziFile(open_resource.f)
+        with source.open() as czi:
             return Reader._read_plane(czi, scene, read_dims)
 
     @staticmethod
@@ -454,8 +616,7 @@ class Reader(BaseReader):
         """
         if self._dims is None:
             order = self.mapped_dims
-            with self._fs.open(self._path) as open_resource:
-                czi = CziFile(open_resource.f)
+            with self._source.open() as czi:
                 dims_shape = Reader._dims_shape_to_scene_dims_shape(
                     czi.get_dims_shape(),
                     self.current_scene_index,
@@ -514,8 +675,7 @@ class Reader(BaseReader):
             spec for d, spec in zip(given_dims, dim_specs) if d in spatial
         )
 
-        with self._fs.open(self._path) as open_resource:
-            czi = CziFile(open_resource.f)
+        with self._source.open() as czi:
             dims_shape = Reader._dims_shape_to_scene_dims_shape(
                 czi.get_dims_shape(),
                 self.current_scene_index,
@@ -698,8 +858,7 @@ class Reader(BaseReader):
             # Add delayed array to lazy arrays at index
             lazy_arrays[np_index] = da.from_delayed(
                 delayed(Reader._read_chunk_from_image)(
-                    fs=self._fs,
-                    path=self._path,
+                    source=self._source,
                     scene=self.current_scene_index,
                     read_dims=this_chunk_read_dims,
                 ),
@@ -772,8 +931,7 @@ class Reader(BaseReader):
         exceptions.UnsupportedFileFormatError
             The file could not be read or is not supported.
         """
-        with self._fs.open(self._path) as open_resource:
-            czi = CziFile(open_resource.f)
+        with self._source.open() as czi:
 
             dims_shape = Reader._dims_shape_to_scene_dims_shape(
                 dims_shape=czi.get_dims_shape(),
@@ -833,8 +991,7 @@ class Reader(BaseReader):
         exceptions.UnsupportedFileFormatError
             The file could not be read or is not supported.
         """
-        with self._fs.open(self._path) as open_resource:
-            czi = CziFile(open_resource.f)
+        with self._source.open() as czi:
             dims_shape = Reader._dims_shape_to_scene_dims_shape(
                 dims_shape=czi.get_dims_shape(),
                 scene_index=self.current_scene_index,
@@ -843,8 +1000,7 @@ class Reader(BaseReader):
 
             # Get image data
             image_data, _ = self._get_image_data(
-                fs=self._fs,
-                path=self._path,
+                source=self._source,
                 scene=self.current_scene_index,
             )
 
@@ -1005,8 +1161,7 @@ class Reader(BaseReader):
 
     def _construct_mosaic_xarray(self, data: types.ArrayLike) -> xr.DataArray:
         # Get max of mosaic positions from lif
-        with self._fs.open(self._path) as open_resource:
-            czi = CziFile(open_resource.f)
+        with self._source.open() as czi:
             dims_shape = Reader._dims_shape_to_scene_dims_shape(
                 dims_shape=czi.get_dims_shape(),
                 scene_index=self.current_scene_index,
@@ -1081,8 +1236,7 @@ class Reader(BaseReader):
         still uses the original plate-wide scene indices.
         """
         if self._czi_scene_index is None:
-            with self._fs.open(self._path) as open_resource:
-                czi = CziFile(open_resource.f)
+            with self._source.open() as czi:
                 self._czi_scene_index = Reader._adjust_scene_index(
                     czi.get_dims_shape(),
                     self.current_scene_index,
@@ -1154,8 +1308,7 @@ class Reader(BaseReader):
         if DimensionNames.MosaicTile not in self.dims.order:
             raise exceptions.UnexpectedShapeError("No mosaic dimension in image.")
 
-        with self._fs.open(self._path) as open_resource:
-            czi = CziFile(open_resource.f)
+        with self._source.open() as czi:
 
             # Default Channel and Time dimensions to 0 to improve
             # worst case read time for large files **only**
@@ -1197,8 +1350,7 @@ class Reader(BaseReader):
         if DimensionNames.MosaicTile not in self.dims.order:
             raise exceptions.UnexpectedShapeError("No mosaic dimension in image.")
 
-        with self._fs.open(self._path) as open_resource:
-            czi = CziFile(open_resource.f)
+        with self._source.open() as czi:
 
             tile_info_to_bboxes = czi.get_all_mosaic_tile_bounding_boxes(
                 S=self.czi_scene_index, **kwargs
@@ -1229,8 +1381,7 @@ class Reader(BaseReader):
             Returns None if extraction fails.
         """
 
-        with self._fs.open(self._path) as open_resource:
-            czi = CziFile(open_resource.f)
+        with self._source.open() as czi:
             return acquisition_times(
                 czi=czi,
                 current_scene=self.czi_scene_index,
@@ -1286,8 +1437,7 @@ class Reader(BaseReader):
             return None
 
         try:
-            with self._fs.open(self._path) as open_resource:
-                czi = CziFile(open_resource.f)
+            with self._source.open() as czi:
                 duration_ms = time_between_subblocks(
                     czi,
                     self.czi_scene_index,

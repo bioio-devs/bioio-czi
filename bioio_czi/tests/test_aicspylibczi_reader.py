@@ -12,7 +12,9 @@ from bioio_base import dimensions, exceptions, test_utilities
 from dateutil import parser
 
 from bioio_czi import Reader
+from bioio_czi.aicspylibczi_reader import reader as aicspylibczi_reader
 from bioio_czi.aicspylibczi_reader.reader import Reader as AicsPyLibCziReader
+from bioio_czi.aicspylibczi_reader.reader import remote_reads_available
 
 from .conftest import LOCAL_RESOURCES_DIR
 
@@ -221,17 +223,43 @@ def test_czi_reader(
     )
 
 
-@pytest.mark.xfail(
-    raises=exceptions.UnsupportedFileFormatError,
-    reason="Do not support remote CZI reading in aicspylibczi mode",
+REMOTE_URL = (
+    "https://allencell.s3.amazonaws.com/aics/hipsc_12x_overview_image_dataset/"
+    "stitchedwelloverviewimagepath/05080558_3500003720_10X_20191220_D3.czi"
 )
-def test_czi_reader_remote_xfail() -> None:
-    # Construct full filepath
-    uri = (
-        "https://allencell.s3.amazonaws.com/aics/hipsc_12x_overview_image_dataset/"
-        "stitchedwelloverviewimagepath/05080558_3500003720_10X_20191220_D3.czi"
-    )
-    Reader(uri, use_aicspylibczi=True)
+
+
+@pytest.mark.skipif(
+    not remote_reads_available(),
+    reason="This aicspylibczi build was compiled without libCZI's curl stream",
+)
+def test_czi_reader_remote() -> None:
+    reader = Reader(REMOTE_URL, use_aicspylibczi=True)
+
+    assert reader.dims.order == "HCYX"
+    assert reader.shape == (1, 1, 5684, 5925)
+    assert reader.physical_pixel_sizes.X == pytest.approx(1.0833333333333333)
+    assert reader.metadata.tag == "ImageDocument"
+
+    # Reads are served by range requests, so asking for a window pulls only the
+    # sub-blocks covering it rather than the whole 5684x5925 image.
+    window = reader.get_image_data("YX", C=0, Y=slice(0, 32), X=slice(0, 32))
+    assert window.shape == (32, 32)
+    assert window.dtype == np.uint16
+
+    # The same read through the dask path, which reopens the image inside the graph.
+    assert np.array_equal(np.asarray(reader.dask_data[0, 0, :32, :32]), window)
+
+
+def test_czi_reader_remote_without_curl_support(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Remote reads are a build-time option in aicspylibczi, so a build without them
+    # has to say so rather than fail somewhere inside libCZI.
+    monkeypatch.setattr(aicspylibczi_reader, "remote_reads_available", lambda: False)
+
+    with pytest.raises(exceptions.UnsupportedFileFormatError, match="curl stream"):
+        Reader(REMOTE_URL, use_aicspylibczi=True)
 
 
 def _normalize_entries(entries: List[dict[str, Any]]) -> List[dict[str, int | str]]:

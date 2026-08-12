@@ -29,6 +29,9 @@ classifiers = [
 ]
 dynamic = ["version"]
 dependencies = [
+  # Reading remote CZIs in aicspylibczi mode needs libCZI's curl stream, added in
+  # bioio-devs/aicspylibczi#135. Raise this pin once that ships; until then the
+  # reader detects at runtime whether the installed build has it.
   "aicspylibczi>=3.2.1",
   "aiohttp",
   "bioio-base>=3.4.0",
@@ -60,6 +63,10 @@ test = [
   "pytest>=5.4.3",
   "pytest-cov>=2.9.0",
   "pytest-raises>=0.11",
+  # Presigning "s3://" URIs is done by fsspec, so reading one end to end needs the
+  # S3 filesystem installed. Not a runtime dependency: users install the filesystem
+  # for whichever object store they read from.
+  "s3fs",
 ]
 
 # entry points
