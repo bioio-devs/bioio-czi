@@ -11,7 +11,7 @@ from typing import Any, Dict, Hashable, Iterator, List, Optional, Tuple, Union
 import dask.array as da
 import numpy as np
 import xarray as xr
-from _aicspylibczi import BBox, TileInfo
+from _aicspylibczi import BBox
 from aicspylibczi import CziFile
 from bioio_base import constants, exceptions
 from bioio_base import io as io_utils
@@ -27,6 +27,7 @@ from dask import delayed
 from fsspec.implementations.local import LocalFileSystem
 from fsspec.spec import AbstractFileSystem
 
+from .. import handle_pool
 from .. import metadata as metadata_utils
 from .. import remote
 from ..bounding_box import size
@@ -85,9 +86,11 @@ class CziSource:
     they travel together, including into dask graphs -- which is why it stores a
     filesystem and a path rather than an open handle.
 
-    Remote sources are re-signed on every open rather than caching a URL, so a dask
-    graph that runs long after the reader was constructed cannot trip over an
-    expired signature. For object stores this is local HMAC work, not a round trip.
+    Remote handles are reused through :mod:`bioio_czi.handle_pool`, which keeps them
+    in a process-global registry rather than on this object. A source is pickled into
+    dask graphs, so it carries only how to reach the image; each worker process then
+    builds its own handles. Opening one signs the URI afresh and the pool retires
+    handles before that signature expires, so no graph can outlive its credentials.
 
     Parameters
     ----------
@@ -143,10 +146,60 @@ class CziSource:
         """
         return remote.is_remote(self.uri)
 
+    @property
+    def needs_signing(self) -> bool:
+        """
+        Whether reaching this image means generating a presigned URL first.
+        """
+        return self.is_remote and not remote.is_http_url(self.uri)
+
+    def _open_remote(self) -> CziFile:
+        """
+        Open the CZI over the network, presigning its URI if it needs it.
+        """
+        if remote.is_http_url(self.uri):
+            url = self.uri
+        else:
+            # Reuse the filesystem the reader already built rather than
+            # reconstructing it (and its credentials) on every open.
+            url = remote.sign_url(
+                self.fs,
+                self.path,
+                uri=self.uri,
+                reader_name=READER_NAME,
+                expiration=self.url_expiration,
+            )
+        return CziFile(url, stream_options=self.stream_options or None)
+
+    def _pool(self) -> handle_pool.HandlePool:
+        """
+        The pool of open handles for this image within this process.
+        """
+        return handle_pool.get_pool(
+            key=(
+                READER_NAME,
+                self.uri,
+                # Rendered rather than tupled: stream options may nest values that
+                # cannot be hashed but do have to distinguish one pool from another.
+                repr(sorted((self.stream_options or {}).items())),
+            ),
+            factory=self._open_remote,
+            # A pooled handle has its presigned URL baked into the curl stream, so it
+            # has to be retired before that signature expires. The margin leaves room
+            # for a read that starts just before the handle is checked.
+            ttl=0.9 * self.url_expiration if self.needs_signing else None,
+        )
+
     @contextmanager
     def open(self) -> Iterator[CziFile]:
         """
         Open the CZI, yielding a ``CziFile`` for the duration of the block.
+
+        Remote handles are pooled and reused, because reopening one means refetching
+        the header, metadata and sub-block directory over the network before any
+        pixels can be read. Local handles are not pooled: reopening a local file is
+        immeasurably cheap next to a read, and holding the descriptor open would keep
+        the file locked for as long as the process lives.
 
         Raises
         ------
@@ -155,20 +208,11 @@ class CziSource:
             files, or its protocol cannot be turned into an http(s) URL.
         """
         if self.is_remote:
+            # Checked on every open, not just when a handle is built: a pooled handle
+            # would otherwise let a build with no curl stream past the guard.
             require_remote_reads(self.uri)
-            if remote.is_http_url(self.uri):
-                url = self.uri
-            else:
-                # Reuse the filesystem the reader already built rather than
-                # reconstructing it (and its credentials) on every open.
-                url = remote.sign_url(
-                    self.fs,
-                    self.path,
-                    uri=self.uri,
-                    reader_name=READER_NAME,
-                    expiration=self.url_expiration,
-                )
-            yield CziFile(url, stream_options=self.stream_options or None)
+            with self._pool().acquire() as czi:
+                yield czi
         else:
             with self.fs.open(self.path) as open_resource:
                 yield CziFile(open_resource.f)
@@ -257,6 +301,7 @@ class Reader(BaseReader):
         fs_kwargs: Dict[str, Any] = {},
         stream_options: Optional[Dict[str, Any]] = None,
         url_expiration: int = remote.DEFAULT_URL_EXPIRATION_SECONDS,
+        mosaic_chunk_size: Optional[Tuple[int, int]] = None,
     ):
         """
         Parameters
@@ -287,6 +332,15 @@ class Reader(BaseReader):
             e.g. "s3://". Reads are issued for as long as this reader (and any dask
             graph built from it) is in use, so this needs to outlast a read session.
             Default: remote.DEFAULT_URL_EXPIRATION_SECONDS
+        mosaic_chunk_size: Optional[Tuple[int, int]]
+            The (height, width) of the chunks the stitched mosaic is read in, which is
+            the granularity at which a window into it costs anything. The default of
+            one native tile per chunk makes small windows as cheap as possible.
+            Because tiles overlap, a tile-sized grid re-reads some sub-blocks when the
+            whole mosaic is pulled through the dask path, so code that always reads
+            entire mosaics can pass a larger size to trade window latency for fewer
+            reads.
+            Default: None (one native tile per chunk)
 
         Notes
         -----
@@ -318,6 +372,8 @@ class Reader(BaseReader):
         self.chunk_dims = chunk_dims
 
         self._include_subblock_metadata = include_subblock_metadata
+
+        self._mosaic_chunk_size = mosaic_chunk_size
 
         # Delayed storage
         self._px_sizes: Optional[types.PhysicalPixelSizes] = None
@@ -1024,207 +1080,247 @@ class Reader(BaseReader):
                 attrs={constants.METADATA_UNPROCESSED: meta},
             )
 
-    @staticmethod
-    def _stitch_tiles(
-        data: types.ArrayLike,
-        data_dims: str,
-        data_dims_shape: Dict[str, Tuple[int, int]],
-        tile_bboxes: Dict[TileInfo, BBox],
-        final_bbox: BBox,
-    ) -> types.ArrayLike:
+    def _construct_mosaic_xarray(self, stitched: types.ArrayLike) -> xr.DataArray:
         """
-        Stitches all mosaic tiles for a single CZI scene into a full-resolution array.
+        Wrap an already-stitched mosaic array in the metadata of this scene.
 
-        High-level process:
-        -------------------
-        1. Preallocate the full mosaic array sized to `final_bbox` (the union of *all*
-        tile bounding boxes). → This array is initially filled with zeros.
-
-        2. For each tile:
-        - Determine source slice.
-        - Determine destination slice (where this tile belongs in the full mosaic).
-        - If the metadata bbox exceeds the true tile pixel shape, clamp both slices.
-        - Copy only the overlapping region from the tile into the mosaic.
-
-        Important detail:
-        -----------------
-        The mosaic allocation is NEVER resized or shrunk. Only per-tile slices are
-        clamped. Any unfilled area in the mosaic remains zero.
+        Parameters
+        ----------
+        stitched: types.ArrayLike
+            The stitched mosaic, in this reader's dimension order minus the mosaic
+            tile dimension. Either in memory or a dask array.
         """
-
-        ordered_dims_present = [
-            dim
-            for dim in data_dims
-            if dim not in [CZI_BLOCK_DIM_CHAR, DimensionNames.MosaicTile]
+        # Copy metadata
+        dims = [
+            d for d in self.xarray_dask_data.dims if d is not DimensionNames.MosaicTile
         ]
-
-        # Build the global output shape according to the dim order.
-        # For non-spatial dims we copy their sizes directly.
-        # For Y/X dims we use final_bbox.h/w (the full combined mosaic extent).
-        arr_shape_list = []
-        for dim in ordered_dims_present:
-            if dim not in REQUIRED_CHUNK_DIMS:
-                arr_shape_list.append(data_dims_shape[dim][1])
-            if dim is DimensionNames.SpatialY:
-                arr_shape_list.append(final_bbox.h)
-            if dim is DimensionNames.SpatialX:
-                arr_shape_list.append(final_bbox.w)
-            if dim is DimensionNames.Samples:
-                arr_shape_list.append(data_dims_shape[CZI_SAMPLES_DIM_CHAR][1])
-
-        # Initialize the output mosaic (zero-filled).
-        # All tiles will be written into slices of this array.
-        if isinstance(data, da.Array):
-            ans = da.zeros(shape=tuple(arr_shape_list), dtype=data.dtype)
-        else:
-            ans = np.zeros(arr_shape_list, dtype=data.dtype)
-
-        # Process each tile and copy it into its appropriate mosaic slice
-        for tile_info, box in tile_bboxes.items():
-
-            # Build the index tuple for selecting this tile from the input data array.
-            tile_dims = tile_info.dimension_coordinates
-            tile_dims.pop(CZI_SCENE_DIM_CHAR, None)
-            tile_dims.pop(CZI_BLOCK_DIM_CHAR, None)
-
-            data_indexes = [
-                tile_dims[t_dim]
-                for t_dim in data_dims
-                if t_dim not in REQUIRED_CHUNK_DIMS
+        coords: Dict[Hashable, Any] = {
+            d: v
+            for d, v in self.xarray_dask_data.coords.items()
+            if d
+            not in [
+                DimensionNames.MosaicTile,
+                DimensionNames.SpatialY,
+                DimensionNames.SpatialX,
             ]
+        }
 
-            # Add fully-open slices for Y and X from the tile
-            data_indexes.append(slice(None))  # Y
-            data_indexes.append(slice(None))  # X
-            if CZI_SAMPLES_DIM_CHAR in tile_dims.keys():
-                data_indexes.append(slice(None))
+        # Add expanded Y and X coords
+        if self.physical_pixel_sizes.Y is not None:
+            dim_y_index = dims.index(DimensionNames.SpatialY)
+            coords[DimensionNames.SpatialY] = Reader._generate_coord_array(
+                0, stitched.shape[dim_y_index], self.physical_pixel_sizes.Y
+            )
+        if self.physical_pixel_sizes.X is not None:
+            dim_x_index = dims.index(DimensionNames.SpatialX)
+            coords[DimensionNames.SpatialX] = Reader._generate_coord_array(
+                0, stitched.shape[dim_x_index], self.physical_pixel_sizes.X
+            )
 
-            # Build the destination slice into the mosaic (`ans_indexes`)
-            ans_indexes = []
-            for dim in ordered_dims_present:
+        attrs = copy(self.xarray_dask_data.attrs)
 
-                # Non-spatial dims: forward the tile's coordinate
-                if dim not in [
-                    DimensionNames.MosaicTile,
-                    DimensionNames.Samples,
-                    DimensionNames.SpatialY,
-                    DimensionNames.SpatialX,
-                ]:
-                    if dim in tile_dims.keys():
-                        ans_indexes.append(tile_dims[dim])
+        return xr.DataArray(
+            data=stitched,
+            dims=dims,
+            coords=coords,
+            attrs=attrs,
+        )
 
-                # Spatial Y/X dims: compute slice relative to mosaic origin
-                if dim is DimensionNames.SpatialY:
-                    start = box.y - final_bbox.y
-                    ans_indexes.append(slice(start, start + box.h, 1))
+    @staticmethod
+    def _read_mosaic_region(
+        source: CziSource,
+        read_dims: Dict[str, int],
+        region: Tuple[int, int, int, int],
+        out_shape: Tuple[int, ...],
+        dtype: np.dtype,
+    ) -> np.ndarray:
+        """
+        Read one rectangle of the stitched mosaic, composited by libCZI.
 
-                if dim is DimensionNames.SpatialX:
-                    start = box.x - final_bbox.x
-                    ans_indexes.append(slice(start, start + box.w, 1))
+        libCZI reads only the sub-blocks that intersect ``region``, so a window costs
+        the tiles it actually covers rather than every tile in the plane. That is the
+        whole point of stitching this way rather than reading all tiles and pasting
+        them together in Python.
 
-                if dim is DimensionNames.Samples:
-                    ans_indexes.append(slice(None))
+        Parameters
+        ----------
+        source: CziSource
+            Where the image lives and how to reopen it.
+        read_dims: Dict[str, int]
+            CZI-native dimension chars to absolute indices, pinning one plane.
+        region: Tuple[int, int, int, int]
+            (x, y, width, height) in the file's mosaic coordinate frame.
+        out_shape: Tuple[int, ...]
+            Shape to return. read_mosaic prepends a size-1 axis per pinned dimension,
+            which is reshaped away here.
+        dtype: np.dtype
+            The dtype the caller declared to dask. A mismatch would hand dask
+            silently wrong data, so it is checked rather than trusted.
+        """
+        with source.open() as czi:
+            data = czi.read_mosaic(region=region, scale_factor=1.0, **read_dims)
 
-            # Extract the tile’s pixel data
-            tile = data[tuple(data_indexes)]
+        if data.dtype != dtype:
+            raise TypeError(
+                f"Mosaic region {region} read back as {data.dtype}, but the mosaic "
+                f"was declared as {dtype}."
+            )
+        return data.reshape(out_shape)
 
-            # Handle mismatches where bbox > actual tile shape
-            y_axis = ordered_dims_present.index(DimensionNames.SpatialY)
-            x_axis = ordered_dims_present.index(DimensionNames.SpatialX)
+    def _mosaic_plane_reads(
+        self, czi: CziFile
+    ) -> Tuple[List[str], List[int], List[int], BBox]:
+        """
+        Work out how to address one composited plane of the current scene.
 
-            y_slice = ans_indexes[y_axis]
-            x_slice = ans_indexes[x_axis]
+        Returns the CZI-native chars of the dimensions that must be pinned for a
+        mosaic read, their sizes, the absolute index each one starts at, and the
+        bounding box of the current scene within the mosaic.
+        """
+        dims_shape = Reader._dims_shape_to_scene_dims_shape(
+            dims_shape=czi.get_dims_shape(),
+            scene_index=self.current_scene_index,
+            consistent=czi.shape_is_consistent,
+        )
+        sizes = dict(zip(self.dims.order, self.dims.shape))
+        spatial = (
+            DimensionNames.MosaicTile,
+            DimensionNames.SpatialY,
+            DimensionNames.SpatialX,
+            DimensionNames.Samples,
+        )
+        # libCZI composites a single plane at a time, so every dimension other than
+        # the tile and spatial ones has to be pinned to one index per read.
+        plane_dims = [d for d in self.dims.order if d not in spatial]
+        czi_chars = [_BIOIO_TO_CZI_DIM.get(d, d) for d in plane_dims]
+        plane_sizes = [sizes[d] for d in plane_dims]
+        begins = [dims_shape[c][0] for c in czi_chars]
+        bbox = czi.get_mosaic_scene_bounding_box(index=self.czi_scene_index)
+        return czi_chars, plane_sizes, begins, bbox
 
-            target_h = y_slice.stop - y_slice.start
-            target_w = x_slice.stop - x_slice.start
+    def _stitched_mosaic_dask(self) -> da.Array:
+        """
+        Build the stitched mosaic as a grid of lazily-read regions.
 
-            tile_h = tile.shape[-2]
-            tile_w = tile.shape[-1]
-
-            # If mismatch, clamp BOTH the destination slice and the tile data slice.
-            # The global mosaic size remains unchanged.
-            if tile_h != target_h or tile_w != target_w:
-                new_h = min(tile_h, target_h)
-                new_w = min(tile_w, target_w)
-
-                # Clamp destination area
-                ans_indexes[y_axis] = slice(y_slice.start, y_slice.start + new_h, 1)
-                ans_indexes[x_axis] = slice(x_slice.start, x_slice.start + new_w, 1)
-
-                # Clamp tile data
-                tile = tile[..., :new_h, :new_w]
-
-            # Copy tile pixels into the mosaic
-            ans[tuple(ans_indexes)] = tile
-
-        return ans
-
-    def _construct_mosaic_xarray(self, data: types.ArrayLike) -> xr.DataArray:
-        # Get max of mosaic positions from lif
+        Each chunk is one ``read_mosaic`` call over its own rectangle, so slicing a
+        window out of the result reads only the tiles under that window. Chunking by
+        tile keeps a small window down to a single read; callers that intend to pull
+        the whole mosaic can trade that for fewer, larger reads with
+        ``mosaic_chunk_size``, because tiles overlap and a tile-sized grid therefore
+        straddles more sub-blocks than a coarser one.
+        """
         with self._source.open() as czi:
-            dims_shape = Reader._dims_shape_to_scene_dims_shape(
-                dims_shape=czi.get_dims_shape(),
-                scene_index=self.current_scene_index,
-                consistent=czi.shape_is_consistent,
-            )
-
-            bboxes = czi.get_all_mosaic_tile_bounding_boxes(S=self.czi_scene_index)
-            mosaic_scene_bbox = czi.get_mosaic_scene_bounding_box(
-                index=self.czi_scene_index
-            )
-
-            # Stitch
-            stitched = self._stitch_tiles(
-                data=data,
-                data_dims=self.mapped_dims,
-                data_dims_shape=dims_shape,
-                tile_bboxes=bboxes,
-                final_bbox=mosaic_scene_bbox,
-            )
-
-            # Copy metadata
-            dims = [
-                d
-                for d in self.xarray_dask_data.dims
-                if d is not DimensionNames.MosaicTile
-            ]
-            coords: Dict[Hashable, Any] = {
-                d: v
-                for d, v in self.xarray_dask_data.coords.items()
-                if d
-                not in [
-                    DimensionNames.MosaicTile,
-                    DimensionNames.SpatialY,
-                    DimensionNames.SpatialX,
-                ]
-            }
-
-            # Add expanded Y and X coords
-            if self.physical_pixel_sizes.Y is not None:
-                dim_y_index = dims.index(DimensionNames.SpatialY)
-                coords[DimensionNames.SpatialY] = Reader._generate_coord_array(
-                    0, stitched.shape[dim_y_index], self.physical_pixel_sizes.Y
-                )
-            if self.physical_pixel_sizes.X is not None:
-                dim_x_index = dims.index(DimensionNames.SpatialX)
-                coords[DimensionNames.SpatialX] = Reader._generate_coord_array(
-                    0, stitched.shape[dim_x_index], self.physical_pixel_sizes.X
+            self._require_mosaic(czi)
+            czi_chars, plane_sizes, begins, bbox = self._mosaic_plane_reads(czi)
+            pixel_type = PIXEL_DICT.get(czi.pixel_type)
+            if pixel_type is None:
+                raise TypeError(
+                    f"Unsupported or unlabeled pixel type: {czi.pixel_type!r}"
                 )
 
-            attrs = copy(self.xarray_dask_data.attrs)
+        sizes = dict(zip(self.dims.order, self.dims.shape))
+        n_samples = sizes.get(DimensionNames.Samples)
+        chunk_h, chunk_w = self._mosaic_chunk_size or (
+            sizes[DimensionNames.SpatialY],
+            sizes[DimensionNames.SpatialX],
+        )
+        y_starts = list(range(0, bbox.h, chunk_h))
+        x_starts = list(range(0, bbox.w, chunk_w))
 
-            return xr.DataArray(
-                data=stitched,
-                dims=dims,
-                coords=coords,
-                attrs=attrs,
+        # One entry per (plane, chunk row, chunk column). The trailing singleton is
+        # the Samples axis, which da.block concatenates rather than stacks.
+        grid_shape: Tuple[int, ...] = tuple(plane_sizes) + (
+            len(y_starts),
+            len(x_starts),
+        )
+        if n_samples is not None:
+            grid_shape += (1,)
+        lazy_arrays: np.ndarray = np.ndarray(grid_shape, dtype=object)
+
+        for index, _ in np.ndenumerate(lazy_arrays):
+            plane_index = index[: len(plane_sizes)]
+            y_start = y_starts[index[len(plane_sizes)]]
+            x_start = x_starts[index[len(plane_sizes) + 1]]
+            height = min(chunk_h, bbox.h - y_start)
+            width = min(chunk_w, bbox.w - x_start)
+            out_shape: Tuple[int, ...] = (height, width)
+            if n_samples is not None:
+                out_shape += (n_samples,)
+
+            lazy_arrays[index] = da.from_delayed(
+                delayed(Reader._read_mosaic_region)(
+                    source=self._source,
+                    read_dims={
+                        char: begin + position
+                        for char, begin, position in zip(czi_chars, begins, plane_index)
+                    },
+                    # The scene's origin within the mosaic is not the origin of the
+                    # mosaic itself; plate files put scenes at large offsets.
+                    region=(bbox.x + x_start, bbox.y + y_start, width, height),
+                    out_shape=out_shape,
+                    dtype=pixel_type,
+                ),
+                shape=out_shape,
+                dtype=pixel_type,
+            )
+
+        return da.block(lazy_arrays.tolist())
+
+    def _stitched_mosaic_numpy(self) -> np.ndarray:
+        """
+        Read the whole stitched mosaic into memory, one composite per plane.
+
+        Deliberately not ``_stitched_mosaic_dask().compute()``: tiles overlap, so a
+        chunk grid covering the entire mosaic touches noticeably more sub-blocks than
+        one read per plane does. The chunked path exists to make windows cheap, not
+        whole reads.
+        """
+        with self._source.open() as czi:
+            self._require_mosaic(czi)
+            czi_chars, plane_sizes, begins, bbox = self._mosaic_plane_reads(czi)
+            pixel_type = PIXEL_DICT.get(czi.pixel_type)
+            if pixel_type is None:
+                raise TypeError(
+                    f"Unsupported or unlabeled pixel type: {czi.pixel_type!r}"
+                )
+
+            sizes = dict(zip(self.dims.order, self.dims.shape))
+            n_samples = sizes.get(DimensionNames.Samples)
+            plane_shape: Tuple[int, ...] = (bbox.h, bbox.w)
+            if n_samples is not None:
+                plane_shape += (n_samples,)
+
+            out = np.empty(tuple(plane_sizes) + plane_shape, dtype=pixel_type)
+            for plane_index in itertools.product(*(range(s) for s in plane_sizes)):
+                read_dims = {
+                    char: begin + position
+                    for char, begin, position in zip(czi_chars, begins, plane_index)
+                }
+                data = czi.read_mosaic(
+                    region=(bbox.x, bbox.y, bbox.w, bbox.h),
+                    scale_factor=1.0,
+                    **read_dims,
+                )
+                out[plane_index] = data.reshape(plane_shape)
+
+        return out
+
+    @staticmethod
+    def _require_mosaic(czi: CziFile) -> None:
+        """
+        Raise unless this image actually has tiles to stitch.
+        """
+        if not czi.is_mosaic():
+            raise exceptions.InvalidDimensionOrderingError(
+                "Cannot create stitched mosaic image for array without tiles "
+                "available."
             )
 
     def _get_stitched_dask_mosaic(self) -> xr.DataArray:
-        return self._construct_mosaic_xarray(self.dask_data)
+        return self._construct_mosaic_xarray(self._stitched_mosaic_dask())
 
     def _get_stitched_mosaic(self) -> xr.DataArray:
-        return self._construct_mosaic_xarray(self.data)
+        return self._construct_mosaic_xarray(self._stitched_mosaic_numpy())
 
     @property
     def czi_scene_index(self) -> int:

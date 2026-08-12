@@ -3,13 +3,15 @@
 
 import pathlib
 from typing import Any, Optional, Tuple
+from unittest import mock
 
 import numpy as np
 import pytest
 from bioio_base import exceptions, types
 from fsspec.implementations.local import LocalFileSystem
 
-from bioio_czi import Reader, remote
+from bioio_czi import Reader, handle_pool, remote
+from bioio_czi.aicspylibczi_reader import reader as aicspylibczi_reader
 from bioio_czi.aicspylibczi_reader.reader import CziSource, remote_reads_available
 
 from .conftest import LOCAL_RESOURCES_DIR
@@ -188,9 +190,50 @@ def test_reader_over_http_matches_local(local_http_server: str) -> None:
     assert over_http.channel_names == local.channel_names
     assert over_http.physical_pixel_sizes == local.physical_pixel_sizes
     np.testing.assert_array_equal(over_http.data, local.data)
-    # The delayed path reopens the image inside the dask graph, so it locates the
-    # remote image separately from the eager path above.
+    # The delayed path locates the remote image from inside the dask graph, so it
+    # reaches it independently of the eager path above.
     np.testing.assert_array_equal(over_http.dask_data.compute(), local.data)
+
+
+@requires_remote_reads
+def test_reader_reuses_remote_handles(local_http_server: str) -> None:
+    # Opening a remote CZI refetches its header, metadata and sub-block directory
+    # before any pixels are read, so repeated reads have to share a handle rather
+    # than paying that every time.
+    handle_pool.clear_pools()
+
+    opens = 0
+    original = aicspylibczi_reader.CziSource._open_remote
+
+    def counting_open(self: aicspylibczi_reader.CziSource) -> Any:
+        nonlocal opens
+        opens += 1
+        return original(self)
+
+    with mock.patch.object(
+        aicspylibczi_reader.CziSource, "_open_remote", counting_open
+    ):
+        reader = Reader(
+            f"{local_http_server}/s_3_t_1_c_3_z_5.czi", use_aicspylibczi=True
+        )
+        for channel in range(3):
+            reader.get_image_data("YX", C=channel, Z=0, Y=slice(0, 32), X=slice(0, 32))
+
+    # Construction alone inspects the image several times, and each read opens it
+    # again; serially, one handle serves all of it.
+    assert opens == 1
+    handle_pool.clear_pools()
+
+
+@requires_remote_reads
+def test_local_reads_are_not_pooled() -> None:
+    # A pooled local handle would hold the file open for the life of the process for
+    # no gain: reopening a local CZI is immeasurably cheap next to reading one.
+    handle_pool.clear_pools()
+    reader = Reader(LOCAL_RESOURCES_DIR / "s_3_t_1_c_3_z_5.czi", use_aicspylibczi=True)
+    reader.get_image_data("YX", C=0, Z=0)
+
+    assert not handle_pool._registry
 
 
 @requires_remote_reads

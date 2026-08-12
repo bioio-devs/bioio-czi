@@ -126,6 +126,13 @@ class Reader(BaseReader):
             How long, in seconds, a presigned URL generated for an object-store image
             stays valid.
             Default: bioio_czi.remote.DEFAULT_URL_EXPIRATION_SECONDS
+        mosaic_chunk_size: Optional[Tuple[int, int]]
+            Ignored unless use_aicspylibczi is True.
+            The (height, width) of the chunks the stitched mosaic is read in, which is
+            the granularity at which a window into it costs anything. Pass a size
+            larger than one tile if entire mosaics are read more often than windows
+            into them.
+            Default: None (one native tile per chunk)
 
         Notes
         -----
