@@ -358,6 +358,18 @@ class Reader(BaseReader):
         """
         return self.dims.shape
 
+    @property
+    def dtype(self) -> np.dtype:
+        """
+        Data type of the image array's elements.
+
+        Returns
+        -------
+        dtype: np.dtype
+            Data-type of the image array's elements.
+        """
+        return np.dtype(PIXEL_DICT[self._pixel_types[0].lower()])
+
     @staticmethod
     def _spatial_window(
         spec: Union[int, slice, list], size: int
