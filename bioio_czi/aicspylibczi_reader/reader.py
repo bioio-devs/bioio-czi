@@ -494,7 +494,8 @@ class Reader(BaseReader):
             Data-type of the image array's elements.
         """
         if self._dtype is None:
-            with self._source.open() as czi:
+            with self._fs.open(self._path) as open_resource:
+                czi = CziFile(open_resource.f)
                 pixel_type = PIXEL_DICT.get(czi.pixel_type)
                 if pixel_type is None:
                     raise TypeError(
