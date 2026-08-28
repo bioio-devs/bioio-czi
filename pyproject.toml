@@ -29,10 +29,7 @@ classifiers = [
 ]
 dynamic = ["version"]
 dependencies = [
-  # Reading remote CZIs in aicspylibczi mode needs libCZI's curl stream, added in
-  # bioio-devs/aicspylibczi#135. Raise this pin once that ships; until then the
-  # reader detects at runtime whether the installed build has it.
-  "aicspylibczi>=3.2.1",
+  "aicspylibczi>=4.0.0",
   "aiohttp",
   "bioio-base>=3.4.0",
   "dask[array]>=2021.4.1",

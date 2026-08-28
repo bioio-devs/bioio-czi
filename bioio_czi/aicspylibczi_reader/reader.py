@@ -12,7 +12,7 @@ import dask.array as da
 import numpy as np
 import xarray as xr
 from _aicspylibczi import BBox
-from aicspylibczi import CziFile
+from aicspylibczi import CziFile, remote_reads_available
 from bioio_base import constants, exceptions
 from bioio_base import io as io_utils
 from bioio_base import types
@@ -34,16 +34,6 @@ from ..bounding_box import size
 from ..channels import get_channel_names
 from ..pixel_sizes import get_physical_pixel_sizes
 from .subblock_metadata import acquisition_times, time_between_subblocks
-
-try:
-    from aicspylibczi import remote_reads_available
-except ImportError:
-    # aicspylibczi releases before remote read support have no way to read over the
-    # network at all. Reporting that here, rather than failing to import, keeps this
-    # plugin working on older aicspylibczi for the local reads it can still do.
-    def remote_reads_available() -> bool:  # type: ignore[misc]
-        return False
-
 
 ###############################################################################
 
