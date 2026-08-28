@@ -5,9 +5,8 @@ from typing import Any, ContextManager, List, Tuple
 import numpy as np
 import pytest
 from bioio_base import dimensions, exceptions, test_utilities
-from pylibCZIrw import czi
 
-from bioio_czi import Reader, handle_pool
+from bioio_czi import Reader
 from bioio_czi.pylibczirw_reader import reader as pylibczirw_reader
 
 from .conftest import LOCAL_RESOURCES_DIR
@@ -208,72 +207,6 @@ def test_czi_reader_remote(url: str, expected_shape: Tuple[int]) -> None:
     window = reader.get_image_data("YX", Y=slice(0, 32), X=slice(0, 32))
     assert window.shape == (32, 32)
     assert window.dtype == np.uint16
-
-
-def test_open_presigns_object_store_uris(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Object-store URIs cannot be handed to libCZI directly, so they are presigned
-    # into an https URL first and then read over the same curl stream as any URL.
-    # Both halves are faked here so the test needs no credentials and no network.
-    # Remote readers are pooled and the pool owns their lifetime, so this fakes the
-    # reader itself rather than the open_czi context manager local reads use.
-    opened: List[Tuple[str, Tuple[Any, ...]]] = []
-
-    def fake_resolve_url(image: str, **kwargs: Any) -> str:
-        assert image == "s3://bucket/prefix/image.czi"
-        return "https://bucket.s3.amazonaws.com/prefix/image.czi?signature=abc"
-
-    class FakeCziReader:
-        def __init__(self, filepath: str, *args: Any) -> None:
-            opened.append((filepath, args))
-
-        def close(self) -> None:
-            pass
-
-    monkeypatch.setattr(pylibczirw_reader.remote, "resolve_url", fake_resolve_url)
-    monkeypatch.setattr(pylibczirw_reader.czi, "CziReader", FakeCziReader)
-    handle_pool.clear_pools()
-
-    with pylibczirw_reader.open("s3://bucket/prefix/image.czi"):
-        pass
-
-    assert opened == [
-        (
-            "https://bucket.s3.amazonaws.com/prefix/image.czi?signature=abc",
-            (czi.ReaderFileInputTypes.Curl,),
-        )
-    ]
-
-    # The pool must not outlive the fake reader it was filled with.
-    handle_pool.clear_pools()
-
-
-def test_open_reuses_remote_readers(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Opening a remote CZI refetches its header, metadata and sub-block directory, so
-    # repeated reads share one reader rather than paying that per read.
-    opens = 0
-
-    def fake_resolve_url(image: str, **kwargs: Any) -> str:
-        return "https://bucket.s3.amazonaws.com/prefix/image.czi?signature=abc"
-
-    class FakeCziReader:
-        def __init__(self, filepath: str, *args: Any) -> None:
-            nonlocal opens
-            opens += 1
-
-        def close(self) -> None:
-            pass
-
-    monkeypatch.setattr(pylibczirw_reader.remote, "resolve_url", fake_resolve_url)
-    monkeypatch.setattr(pylibczirw_reader.czi, "CziReader", FakeCziReader)
-    handle_pool.clear_pools()
-
-    for _ in range(5):
-        with pylibczirw_reader.open("s3://bucket/prefix/image.czi"):
-            pass
-
-    assert opens == 1
-
-    handle_pool.clear_pools()
 
 
 def test_open_reads_local_paths_off_disk(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1,12 +1,14 @@
 import itertools
 import logging
+import threading
+import time
 import xml.etree.ElementTree as ET
 from contextlib import contextmanager
 from copy import copy
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, Hashable, Iterator, List, Optional, Tuple, Union
+from typing import Any, Dict, Generator, Hashable, List, Optional, Tuple, Union
 
 import dask.array as da
 import numpy as np
@@ -27,7 +29,6 @@ from dask import delayed
 from fsspec.implementations.local import LocalFileSystem
 from fsspec.spec import AbstractFileSystem
 
-from .. import handle_pool
 from .. import metadata as metadata_utils
 from .. import remote
 from ..bounding_box import size
@@ -76,11 +77,11 @@ class CziSource:
     they travel together, including into dask graphs -- which is why it stores a
     filesystem and a path rather than an open handle.
 
-    Remote handles are reused through :mod:`bioio_czi.handle_pool`, which keeps them
-    in a process-global registry rather than on this object. A source is pickled into
-    dask graphs, so it carries only how to reach the image; each worker process then
-    builds its own handles. Opening one signs the URI afresh and the pool retires
-    handles before that signature expires, so no graph can outlive its credentials.
+    Remote handles are cached on the source so that successive reads (metadata, image
+    data, mosaic planes) share a single open connection without re-fetching the header
+    and sub-block directory each time. The cache is a non-picklable attribute: when
+    the source is serialised into a dask graph and unpickled in a worker process, the
+    cache starts empty and the worker builds its own handle independently.
 
     Parameters
     ----------
@@ -105,6 +106,25 @@ class CziSource:
     uri: str
     stream_options: Optional[Dict[str, Any]] = None
     url_expiration: int = remote.DEFAULT_URL_EXPIRATION_SECONDS
+
+    def __post_init__(self) -> None:
+        self._handle: Optional[CziFile] = None
+        self._handle_opened_at: float = 0.0
+        self._lock = threading.Lock()
+
+    def __getstate__(self) -> Dict[str, Any]:
+        return {
+            "fs": self.fs,
+            "path": self.path,
+            "uri": self.uri,
+            "stream_options": self.stream_options,
+            "url_expiration": self.url_expiration,
+        }
+
+    def __setstate__(self, state: Dict[str, Any]) -> None:
+        for k, v in state.items():
+            object.__setattr__(self, k, v)
+        self.__post_init__()
 
     @classmethod
     def from_fs(
@@ -150,8 +170,6 @@ class CziSource:
         if remote.is_http_url(self.uri):
             url = self.uri
         else:
-            # Reuse the filesystem the reader already built rather than
-            # reconstructing it (and its credentials) on every open.
             url = remote.sign_url(
                 self.fs,
                 self.path,
@@ -161,33 +179,19 @@ class CziSource:
             )
         return CziFile(url, stream_options=self.stream_options or None)
 
-    def _pool(self) -> handle_pool.HandlePool:
-        """
-        The pool of open handles for this image within this process.
-        """
-        return handle_pool.get_pool(
-            key=(
-                READER_NAME,
-                self.uri,
-                # Rendered rather than tupled: stream options may nest values that
-                # cannot be hashed but do have to distinguish one pool from another.
-                repr(sorted((self.stream_options or {}).items())),
-            ),
-            factory=self._open_remote,
-            # A pooled handle has its presigned URL baked into the curl stream, so it
-            # has to be retired before that signature expires. The margin leaves room
-            # for a read that starts just before the handle is checked.
-            ttl=0.9 * self.url_expiration if self.needs_signing else None,
-        )
+    def _handle_is_stale(self) -> bool:
+        if not self.needs_signing:
+            return False
+        return (time.monotonic() - self._handle_opened_at) >= 0.9 * self.url_expiration
 
     @contextmanager
-    def open(self) -> Iterator[CziFile]:
+    def open(self) -> Generator[CziFile, None, None]:
         """
         Open the CZI, yielding a ``CziFile`` for the duration of the block.
 
-        Remote handles are pooled and reused, because reopening one means refetching
+        Remote handles are cached and reused, because reopening one means refetching
         the header, metadata and sub-block directory over the network before any
-        pixels can be read. Local handles are not pooled: reopening a local file is
+        pixels can be read. Local handles are not cached: reopening a local file is
         immeasurably cheap next to a read, and holding the descriptor open would keep
         the file locked for as long as the process lives.
 
@@ -198,11 +202,13 @@ class CziSource:
             files, or its protocol cannot be turned into an http(s) URL.
         """
         if self.is_remote:
-            # Checked on every open, not just when a handle is built: a pooled handle
-            # would otherwise let a build with no curl stream past the guard.
             require_remote_reads(self.uri)
-            with self._pool().acquire() as czi:
-                yield czi
+            with self._lock:
+                if self._handle is None or self._handle_is_stale():
+                    self._handle = self._open_remote()
+                    self._handle_opened_at = time.monotonic()
+                handle = self._handle
+            yield handle
         else:
             with self.fs.open(self.path) as open_resource:
                 yield CziFile(open_resource.f)
@@ -238,7 +244,7 @@ class Reader(BaseReader):
 
     Notes
     -----
-    To use this reader, install with: `pip install aicspylibczi>=3.3.1`.
+    To use this reader, install with: `pip install aicspylibczi>=4.0.0`.
     """
 
     NAME = "bioio-czi-aicspylibczi"

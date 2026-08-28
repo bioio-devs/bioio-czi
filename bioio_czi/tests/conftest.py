@@ -34,7 +34,8 @@ class _RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         size = os.fstat(handle.fileno()).st_size
         range_header = self.headers.get("Range")
         if range_header is None:
-            body: BinaryIO = handle
+            with handle:
+                body: BinaryIO = io.BytesIO(handle.read())
             length = size
             status = 200
         else:

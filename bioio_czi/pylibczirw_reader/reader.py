@@ -3,11 +3,15 @@
 
 import itertools
 import logging
+import threading
+import time
+from contextlib import contextmanager
 from typing import (
     Any,
     Callable,
     ContextManager,
     Dict,
+    Iterator,
     List,
     Optional,
     Tuple,
@@ -30,7 +34,7 @@ from dask import delayed
 from fsspec.spec import AbstractFileSystem
 from pylibCZIrw import czi
 
-from .. import handle_pool, metadata, remote
+from .. import metadata, remote
 from ..channels import get_channel_names, size
 from ..metadata import UnsupportedMetadataError
 from ..pixel_sizes import get_physical_pixel_sizes
@@ -728,6 +732,10 @@ class Reader(BaseReader):
         return None
 
 
+_remote_cache: Dict[Any, Tuple["czi.CziReader", float]] = {}
+_remote_cache_lock = threading.Lock()
+
+
 def open(
     filepath: str, fs_kwargs: Optional[Dict[str, Any]] = None
 ) -> ContextManager[czi.CziReader]:
@@ -754,43 +762,44 @@ def open(
     other than http(s) are presigned into an https URL first, so credentials are
     resolved by fsspec and never handed to libCZI.
 
-    Remote readers are pooled and reused between calls, because opening one refetches
+    Remote readers are cached and reused between calls, because opening one refetches
     the header, metadata and sub-block directory over the network before any pixels
     can be read. Local files are opened directly: reopening one is immeasurably cheap
     next to a read, and holding it open would keep the file locked.
     """
     if remote.is_remote(filepath):
-        return _open_remote_pooled(filepath, fs_kwargs)
+        return _open_remote_cached(filepath, fs_kwargs)
     return czi.open_czi(filepath)
 
 
-def _open_remote_pooled(
+@contextmanager
+def _open_remote_cached(
     filepath: str, fs_kwargs: Optional[Dict[str, Any]]
-) -> ContextManager[czi.CziReader]:
+) -> Iterator[czi.CziReader]:
     """
-    Take a pooled reader for a remote image, opening one if none is idle.
+    Yield a cached reader for a remote image, opening one if none is cached or stale.
     """
-
-    def factory() -> czi.CziReader:
-        url = remote.resolve_url(filepath, reader_name=READER_NAME, fs_kwargs=fs_kwargs)
-        # Constructed directly rather than through open_czi, whose context manager
-        # closes the reader as soon as it is garbage collected. The pool owns the
-        # reader's lifetime instead and closes it when it is retired.
-        return czi.CziReader(url, czi.ReaderFileInputTypes.Curl)
-
-    pool = handle_pool.get_pool(
-        # Rendered rather than tupled: filesystem options nest dicts and lists, which
-        # cannot be hashed but do have to distinguish one pool from another.
-        key=(READER_NAME, filepath, repr(sorted((fs_kwargs or {}).items()))),
-        factory=factory,
-        # A presigned URL is baked into the reader's stream when it is opened, so
-        # retire handles before the signature expires. http(s) URLs carry no
-        # signature and so never go stale.
-        ttl=(
-            0.9 * remote.DEFAULT_URL_EXPIRATION_SECONDS
-            if not remote.is_http_url(filepath)
-            else None
-        ),
-        closer=lambda reader: reader.close(),
+    key = (READER_NAME, filepath, repr(sorted((fs_kwargs or {}).items())))
+    ttl = (
+        0.9 * remote.DEFAULT_URL_EXPIRATION_SECONDS
+        if not remote.is_http_url(filepath)
+        else None
     )
-    return pool.acquire()
+
+    with _remote_cache_lock:
+        entry = _remote_cache.get(key)
+        if entry is not None:
+            reader, opened_at = entry
+            if ttl is not None and (time.monotonic() - opened_at) >= ttl:
+                reader.close()
+                entry = None
+        if entry is None:
+            url = remote.resolve_url(
+                filepath, reader_name=READER_NAME, fs_kwargs=fs_kwargs
+            )
+            reader = czi.CziReader(url, czi.ReaderFileInputTypes.Curl)
+            _remote_cache[key] = (reader, time.monotonic())
+        else:
+            reader, _ = entry
+
+    yield reader
