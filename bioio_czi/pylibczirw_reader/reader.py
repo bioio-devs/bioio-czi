@@ -3,11 +3,15 @@
 
 import itertools
 import logging
+import threading
+import time
+from contextlib import contextmanager
 from typing import (
     Any,
     Callable,
     ContextManager,
     Dict,
+    Iterator,
     List,
     Optional,
     Tuple,
@@ -30,12 +34,14 @@ from dask import delayed
 from fsspec.spec import AbstractFileSystem
 from pylibCZIrw import czi
 
-from .. import metadata
+from .. import metadata, remote
 from ..channels import get_channel_names, size
 from ..metadata import UnsupportedMetadataError
 from ..pixel_sizes import get_physical_pixel_sizes
 
 log = logging.getLogger(__name__)
+
+READER_NAME = "bioio-czi[pylibczirw mode]"
 
 PIXEL_DICT = {
     "gray8": np.uint8,
@@ -57,10 +63,22 @@ class Reader(BaseReader):
     Parameters
     ----------
     image: types.PathLike
-        Path to image file to construct Reader for.
+        Path to image file to construct Reader for. May be a local path, an http(s)
+        URL, or an object-store URI such as "s3://bucket/key". See the Notes section
+        for how remote images are read.
     fs_kwargs: Dict[str, Any]
         Any specific keyword arguments to pass down to the fsspec created filesystem.
+        Only used to presign object-store URIs; local paths and http(s) URLs go
+        straight to libCZI.
         Default: {}
+
+    Notes
+    -----
+    Remote images are read by libCZI's curl-based stream, which issues range
+    requests for just the sub-blocks needed rather than downloading the whole file.
+    The server must support range requests. Protocols other than http(s) are
+    presigned into an https URL by their fsspec filesystem, so credentials are
+    resolved by fsspec in the usual way.
     """
 
     NAME = "bioio-czi-pylibczirw"
@@ -99,19 +117,27 @@ class Reader(BaseReader):
             or raises an exception if it is not.
         """
         try:
-            with open(path):
+            with open(path, fs_kwargs=kwargs.get("fs_kwargs")):
                 return True
-        except RuntimeError as e:
+        except exceptions.UnsupportedFileFormatError:
+            # Already explains itself, e.g. a protocol that cannot be presigned.
+            raise
+        except (RuntimeError, OSError) as e:
+            # libCZI reports an unreadable file as a RuntimeError. Reading over the
+            # network adds connection and HTTP failures on top, which arrive as
+            # OSError, and mean "could not fetch" rather than "not a CZI" -- but
+            # either way this reader cannot open the image.
             raise exceptions.UnsupportedFileFormatError(
-                "bioio-czi[pylibczirw mode]",
+                READER_NAME,
                 path,
                 str(e),
             )
 
     def __init__(self, image: types.PathLike, fs_kwargs: Dict[str, Any] = {}) -> None:
         path = str(image)
+        self._fs_kwargs = fs_kwargs
         try:
-            with open(path) as file:
+            with open(path, fs_kwargs=fs_kwargs) as file:
                 self._fs = None  # Unused but required by tests
                 self._path = path
                 self._total_bounding_box = file.total_bounding_box_no_pyramid
@@ -120,8 +146,11 @@ class Reader(BaseReader):
                     file.scenes_bounding_rectangle_no_pyramid
                 )
                 self._czi_scene_indices = sorted(self._scenes_bounding_rectangle.keys())
-        except RuntimeError:
-            raise exceptions.UnsupportedFileFormatError(self.__class__.__name__, path)
+        except (RuntimeError, OSError) as e:
+            # See _is_supported_image for why OSError is caught alongside RuntimeError.
+            raise exceptions.UnsupportedFileFormatError(
+                self.__class__.__name__, path, str(e)
+            )
 
     @property
     def scenes(self) -> Tuple[str, ...]:
@@ -269,7 +298,7 @@ class Reader(BaseReader):
             ), f"Expected {len(indices)} >= {len(index_dims)}."
             # E.g., plane = {'T': 0, 'C': 1, 'Z': 2}
             plane = {d: indices[i] for i, d in enumerate(index_dims)}
-            with open(self._path) as file:
+            with open(self._path, fs_kwargs=self._fs_kwargs) as file:
                 result = file.read(scene=current_scene, plane=plane, roi=current_roi)
             # result.shape is (Y, X, 1) or (Y, X, 3) depending on whether it's RGB
             # or grayscale. We want to return (Y, X) or (Y, X, 3).
@@ -479,7 +508,7 @@ class Reader(BaseReader):
         ]
 
         out: Optional[np.ndarray] = None
-        with open(self._path) as file:
+        with open(self._path, fs_kwargs=self._fs_kwargs) as file:
             for combo in itertools.product(*enumerated):
                 out_pos = tuple(pos for pos, _idx in combo if pos is not None)
                 plane = {d: idx for (d, (_pos, idx)) in zip(cullable_dims, combo)}
@@ -676,7 +705,7 @@ class Reader(BaseReader):
         https://docs.python.org/3/library/xml.html#xml-vulnerabilities
         """
         if self._metadata is None:
-            with open(self._path) as file:
+            with open(self._path, fs_kwargs=self._fs_kwargs) as file:
                 self._metadata = ET.fromstring(file.raw_metadata)
         return self._metadata
 
@@ -715,11 +744,74 @@ class Reader(BaseReader):
         return None
 
 
-def open(filepath: str) -> ContextManager[czi.CziReader]:
+_remote_cache: Dict[Any, Tuple["czi.CziReader", float]] = {}
+_remote_cache_lock = threading.Lock()
+
+
+def open(
+    filepath: str, fs_kwargs: Optional[Dict[str, Any]] = None
+) -> ContextManager[czi.CziReader]:
     """
-    Wrapper around czi.open_czi to provide type hinting that clarifies the result
-    is a czi.CziReader
+    Open a CZI wherever it lives, local or remote.
+
+    Also wraps czi.open_czi to provide type hinting that clarifies the result is a
+    czi.CziReader.
+
+    Parameters
+    ----------
+    filepath: str
+        A local path, an http(s) URL, or an object-store URI such as
+        "s3://bucket/key".
+    fs_kwargs: Optional[Dict[str, Any]]
+        Keyword arguments for the fsspec filesystem used to presign object-store
+        URIs. Ignored for local paths and http(s) URLs.
+        Default: None
+
+    Notes
+    -----
+    Remote images are read through libCZI's curl-based stream, which fetches only
+    the byte ranges it needs rather than downloading the whole file. Protocols
+    other than http(s) are presigned into an https URL first, so credentials are
+    resolved by fsspec and never handed to libCZI.
+
+    Remote readers are cached and reused between calls, because opening one refetches
+    the header, metadata and sub-block directory over the network before any pixels
+    can be read. Local files are opened directly: reopening one is immeasurably cheap
+    next to a read, and holding it open would keep the file locked.
     """
-    if filepath.startswith("http") or filepath.startswith("https"):
-        return czi.open_czi(filepath, czi.ReaderFileInputTypes.Curl)
+    if remote.is_remote(filepath):
+        return _open_remote_cached(filepath, fs_kwargs)
     return czi.open_czi(filepath)
+
+
+@contextmanager
+def _open_remote_cached(
+    filepath: str, fs_kwargs: Optional[Dict[str, Any]]
+) -> Iterator[czi.CziReader]:
+    """
+    Yield a cached reader for a remote image, opening one if none is cached or stale.
+    """
+    key = (READER_NAME, filepath, repr(sorted((fs_kwargs or {}).items())))
+    ttl = (
+        0.9 * remote.DEFAULT_URL_EXPIRATION_SECONDS
+        if not remote.is_http_url(filepath)
+        else None
+    )
+
+    with _remote_cache_lock:
+        entry = _remote_cache.get(key)
+        if entry is not None:
+            reader, opened_at = entry
+            if ttl is not None and (time.monotonic() - opened_at) >= ttl:
+                reader.close()
+                entry = None
+        if entry is None:
+            url = remote.resolve_url(
+                filepath, reader_name=READER_NAME, fs_kwargs=fs_kwargs
+            )
+            reader = czi.CziReader(url, czi.ReaderFileInputTypes.Curl)
+            _remote_cache[key] = (reader, time.monotonic())
+        else:
+            reader, _ = entry
+
+    yield reader

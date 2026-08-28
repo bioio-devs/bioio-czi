@@ -95,11 +95,12 @@ class Reader(BaseReader):
         Parameters
         ----------
         image: types.PathLike
-            Path to image file.
+            Path to image file. May be a local path, an http(s) URL, or an
+            object-store URI such as "s3://bucket/key". See the Notes section for
+            how remote images are read.
         use_aicspylibczi: bool
             Read CZIs with the aicspylibczi library. Use aicspylibczi if you want to
-            read individual tiles from a scene. However, aicspylibczi cannot read files
-            over the internet. Default: False
+            read individual tiles from a scene. Default: False
         chunk_dims: Union[str, List[str]]
             Ignored unless use_aicspylibczi is True.
             Which dimensions to create chunks for.
@@ -112,9 +113,37 @@ class Reader(BaseReader):
             Whether to append metadata from the subblocks to the rest of the embeded
             metadata.
         fs_kwargs: Dict[str, Any]
-            Ignored unless use_aicspylibczi is True.
-            Any specific keyword arguments to pass to the fsspec-created filesystem.
+            Any specific keyword arguments to pass to the fsspec-created filesystem,
+            which is used to presign object-store URIs.
             Default: {}
+        stream_options: Optional[Dict[str, Any]]
+            Ignored unless use_aicspylibczi is True.
+            libCZI stream options for remote images, e.g. {"timeout": 60} or
+            {"xoauth2_bearer": token}. Ignored for local images.
+            Default: None
+        url_expiration: int
+            Ignored unless use_aicspylibczi is True.
+            How long, in seconds, a presigned URL generated for an object-store image
+            stays valid.
+            Default: bioio_czi.remote.DEFAULT_URL_EXPIRATION_SECONDS
+        mosaic_chunk_size: Optional[Tuple[int, int]]
+            Ignored unless use_aicspylibczi is True.
+            The (height, width) of the chunks the stitched mosaic is read in, which is
+            the granularity at which a window into it costs anything. Pass a size
+            larger than one tile if entire mosaics are read more often than windows
+            into them.
+            Default: None (one native tile per chunk)
+
+        Notes
+        -----
+        Both modes read remote images with libCZI's curl-based stream, which fetches
+        only the byte ranges it needs rather than downloading the whole file, so the
+        server must support range requests. Protocols other than http(s) are
+        presigned into an https URL by their fsspec filesystem, so credentials are
+        resolved by fsspec in the usual way.
+
+        Remote reading in aicspylibczi mode additionally requires an aicspylibczi
+        built with libCZI's curl stream, which is a build-time option.
         """
         if use_aicspylibczi:
             self._implementation = AicsPyLibCziReader(image, **kwargs)

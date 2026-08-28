@@ -12,7 +12,9 @@ from bioio_base import dimensions, exceptions, test_utilities
 from dateutil import parser
 
 from bioio_czi import Reader
+from bioio_czi.aicspylibczi_reader import reader as aicspylibczi_reader
 from bioio_czi.aicspylibczi_reader.reader import Reader as AicsPyLibCziReader
+from bioio_czi.aicspylibczi_reader.reader import remote_reads_available
 
 from .conftest import LOCAL_RESOURCES_DIR
 
@@ -221,17 +223,43 @@ def test_czi_reader(
     )
 
 
-@pytest.mark.xfail(
-    raises=exceptions.UnsupportedFileFormatError,
-    reason="Do not support remote CZI reading in aicspylibczi mode",
+REMOTE_URL = (
+    "https://allencell.s3.amazonaws.com/aics/hipsc_12x_overview_image_dataset/"
+    "stitchedwelloverviewimagepath/05080558_3500003720_10X_20191220_D3.czi"
 )
-def test_czi_reader_remote_xfail() -> None:
-    # Construct full filepath
-    uri = (
-        "https://allencell.s3.amazonaws.com/aics/hipsc_12x_overview_image_dataset/"
-        "stitchedwelloverviewimagepath/05080558_3500003720_10X_20191220_D3.czi"
-    )
-    Reader(uri, use_aicspylibczi=True)
+
+
+@pytest.mark.skipif(
+    not remote_reads_available(),
+    reason="This aicspylibczi build was compiled without libCZI's curl stream",
+)
+def test_czi_reader_remote() -> None:
+    reader = Reader(REMOTE_URL, use_aicspylibczi=True)
+
+    assert reader.dims.order == "HCYX"
+    assert reader.shape == (1, 1, 5684, 5925)
+    assert reader.physical_pixel_sizes.X == pytest.approx(1.0833333333333333)
+    assert reader.metadata.tag == "ImageDocument"
+
+    # Reads are served by range requests, so asking for a window pulls only the
+    # sub-blocks covering it rather than the whole 5684x5925 image.
+    window = reader.get_image_data("YX", C=0, Y=slice(0, 32), X=slice(0, 32))
+    assert window.shape == (32, 32)
+    assert window.dtype == np.uint16
+
+    # The same read through the dask path, which reopens the image inside the graph.
+    assert np.array_equal(np.asarray(reader.dask_data[0, 0, :32, :32]), window)
+
+
+def test_czi_reader_remote_without_curl_support(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Remote reads are a build-time option in aicspylibczi, so a build without them
+    # has to say so rather than fail somewhere inside libCZI.
+    monkeypatch.setattr(aicspylibczi_reader, "remote_reads_available", lambda: False)
+
+    with pytest.raises(exceptions.UnsupportedFileFormatError, match="curl stream"):
+        Reader(REMOTE_URL, use_aicspylibczi=True)
 
 
 def _normalize_entries(entries: List[dict[str, Any]]) -> List[dict[str, int | str]]:
@@ -775,57 +803,97 @@ def test_czi_reader_mosaic_coords(
     )
 
 
-def test_czi_reader_stitch_tiles_clamps_bbox_mismatch() -> None:
+def test_czi_reader_mosaic_eager_and_dask_agree() -> None:
     """
-    Test to ensure _stitch_tiles can handle a tile whose actual
-    Y/X size is smaller than the bounding box region.
+    The stitched mosaic is read one way when it is pulled whole and another way when
+    it is pulled in chunks, so the two paths have to produce the same pixels.
     """
-
-    # Fake tile data: shape (C, Y, X) = (1, 4, 5)
-    tile_data = np.arange(1 * 4 * 5, dtype=np.uint16).reshape((1, 4, 5))
-
-    data = tile_data
-    data_dims = "CYX"
-    data_dims_shape = {
-        "C": (0, 1),
-        dimensions.DimensionNames.SpatialY: (0, 4),
-        dimensions.DimensionNames.SpatialX: (0, 5),
-    }
-
-    class DummyTileInfo:
-        def __init__(self) -> None:
-            self.dimension_coordinates = {
-                "C": 0,
-                dimensions.DimensionNames.SpatialY: 0,
-                dimensions.DimensionNames.SpatialX: 0,
-            }
-
-    class DummyBBox:
-        def __init__(self, x: int, y: int, w: int, h: int) -> None:
-            self.x = x
-            self.y = y
-            self.w = w
-            self.h = h
-
-    tile_info = DummyTileInfo()
-
-    # Final mosaic is larger than tile: h=6, w=8
-    final_bbox = DummyBBox(x=0, y=0, w=8, h=6)
-    tile_bbox = DummyBBox(x=0, y=0, w=8, h=6)
-
-    stitched = AicsPyLibCziReader._stitch_tiles(
-        data=data,
-        data_dims=data_dims,
-        data_dims_shape=data_dims_shape,
-        tile_bboxes={tile_info: tile_bbox},
-        final_bbox=final_bbox,
+    reader = Reader(
+        LOCAL_RESOURCES_DIR / "OverViewScan.czi",
+        use_aicspylibczi=True,
     )
 
-    # mosaic shape should follow final bbox (C, Y, X) = (1, 6, 8)
-    assert stitched.shape == (1, 6, 8)
+    np.testing.assert_array_equal(reader.mosaic_dask_data.compute(), reader.mosaic_data)
 
-    # The overlapping region should match the original tile data
-    np.testing.assert_array_equal(stitched[:, 0:4, 0:5], tile_data)
+
+def test_czi_reader_mosaic_is_chunked_by_tile() -> None:
+    """
+    The stitched mosaic must be a grid of chunks rather than one block. A single
+    chunk would make every window depend on every tile, which is what makes windowed
+    reads expensive over the network.
+    """
+    reader = Reader(
+        LOCAL_RESOURCES_DIR / "OverViewScan.czi",
+        use_aicspylibczi=True,
+    )
+
+    chunk_rows, chunk_cols = reader.mosaic_dask_data.chunks[-2:]
+    assert len(chunk_rows) > 1
+    assert len(chunk_cols) > 1
+    # Chunks default to one native tile.
+    assert chunk_rows[0] == reader.dims.Y
+    assert chunk_cols[0] == reader.dims.X
+
+
+def test_czi_reader_mosaic_window_reads_one_region(monkeypatch: Any) -> None:
+    """
+    A window smaller than a tile must cost a single region read, not one read per
+    tile in the plane. This is the whole point of chunking the mosaic.
+    """
+    reader = Reader(
+        LOCAL_RESOURCES_DIR / "OverViewScan.czi",
+        use_aicspylibczi=True,
+    )
+
+    regions = []
+    original = AicsPyLibCziReader._read_mosaic_region
+
+    def counting_read(*args: Any, **kwargs: Any) -> np.ndarray:
+        regions.append(kwargs.get("region"))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(
+        AicsPyLibCziReader, "_read_mosaic_region", staticmethod(counting_read)
+    )
+
+    window = reader.mosaic_dask_data[..., 0:64, 0:64].compute()
+
+    assert window.shape[-2:] == (64, 64)
+    assert len(regions) == 1
+
+
+def test_czi_reader_mosaic_chunk_size_is_configurable() -> None:
+    """
+    Reading whole mosaics is cheaper with chunks larger than a tile, because tiles
+    overlap and a tile-sized grid straddles more sub-blocks than a coarse one.
+    """
+    reader = Reader(
+        LOCAL_RESOURCES_DIR / "OverViewScan.czi",
+        use_aicspylibczi=True,
+        mosaic_chunk_size=(1024, 1024),
+    )
+
+    chunk_rows, chunk_cols = reader.mosaic_dask_data.chunks[-2:]
+    assert chunk_rows[0] == 1024
+    assert chunk_cols[0] == 1024
+
+    default_reader = Reader(
+        LOCAL_RESOURCES_DIR / "OverViewScan.czi",
+        use_aicspylibczi=True,
+    )
+    np.testing.assert_array_equal(
+        reader.mosaic_dask_data.compute(), default_reader.mosaic_data
+    )
+
+
+def test_czi_reader_mosaic_rejects_non_mosaic_image() -> None:
+    reader = Reader(
+        LOCAL_RESOURCES_DIR / "s_1_t_1_c_1_z_1.czi",
+        use_aicspylibczi=True,
+    )
+
+    with pytest.raises(exceptions.InvalidDimensionOrderingError):
+        reader.mosaic_data
 
 
 # ---------------------------------------------------------------------------

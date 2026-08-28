@@ -33,14 +33,14 @@ Install bioio-czi alongside bioio:
 
 | Feature                                             | pylibczirw mode | aicspylibczi mode |
 | --------------------------------------------------- | --------------- | ----------------- |
-| Read CZIs from the internet                         | ✅              | ❌                |
+| Read CZIs from the internet                         | ✅              | ✅\*\*\*          |
 | Read single tile from tiled CZI                     | ❌              | ✅                |
 | Read single tile's metadata from tiled CZI          | ❌              | ✅                |
 | Read elapsed time metadata\*                        | ❌              | ✅                |
 | Handle CZIs with different dimensions per scene\*\* | ❌              | ✅                |
 | Read stitched mosaic of a tiled CZI                 | ✅              | ✅                |
 
-The primary difference is that `pylibczirw` supports reading CZIs over the internet but cannot access individual tiles from a tiled CZI. To use `aicspylibczi`, add the `use_aicspylibczi=True` parameter when creating a reader. For example: `from bioio import BioImage; img = BioImage(..., use_aicspylibczi=True)`.
+The primary difference is that `pylibczirw` cannot access individual tiles from a tiled CZI. To use `aicspylibczi`, add the `use_aicspylibczi=True` parameter when creating a reader. For example: `from bioio import BioImage; img = BioImage(..., use_aicspylibczi=True)`.
 
 \*Elapsed time metadata include the following. These are derived from individual subblock metadata.
 
@@ -49,6 +49,8 @@ The primary difference is that `pylibczirw` supports reading CZIs over the inter
 - `BioImage(...).standard_metadata.total_time_duration`
 
 \*\*The underlying pylibczirw reader only exposes per-scene X and Y dimensions. Files that do not have consistent dimensions per scene may be read incorrectly in pylibczirw mode.
+
+\*\*\*Remote reading in `aicspylibczi` mode needs an `aicspylibczi` built with libCZI's curl stream, which is a build-time option. See [Reading remote CZIs](#reading-remote-czis).
 
 ## Example Usage (see full documentation for more examples)
 
@@ -66,7 +68,63 @@ img = BioImage(path)
 print(img.shape)  # (1, 1, 1, 5684, 5925)
 ```
 
-Note: accessing files from the internet is not available in `aicspylibczi` mode.
+### Reading remote CZIs
+
+Both modes read remote CZIs through libCZI's curl-based stream, which issues HTTP
+range requests for just the sub-blocks a read needs instead of downloading the whole
+file. The server must support range requests.
+
+```python
+from bioio import BioImage
+
+url = (
+    "https://allencell.s3.amazonaws.com/aics/hipsc_12x_overview_image_dataset/"
+    "stitchedwelloverviewimagepath/05080558_3500003720_10X_20191220_D3.czi"
+)
+
+img = BioImage(url, use_aicspylibczi=True)
+# Only the bytes covering this window are fetched, not the full 5684x5925 image.
+print(img.get_image_data("YX", C=0, Y=slice(0, 512), X=slice(0, 512)).shape)
+```
+
+Object stores addressed by their own protocol -- `s3://`, `gs://`, `az://` -- are
+supported by asking the matching [fsspec](https://filesystem-spec.readthedocs.io)
+filesystem to presign the object into an https URL, which is then read like any other
+URL. Credentials stay with fsspec and are resolved the way that filesystem normally
+resolves them, so the protocol's fsspec package must be installed (`s3fs`, `gcsfs`,
+`adlfs`, ...):
+
+```python
+img = BioImage("s3://my-bucket/images/my_file.czi")
+
+# Pass filesystem options, e.g. a profile or anonymous access, with fs_kwargs.
+img = BioImage("s3://my-bucket/images/my_file.czi", fs_kwargs={"profile": "my-profile"})
+```
+
+Presigned URLs expire. A URL is generated fresh each time the file is opened, including
+inside dask graphs, so a long-running lazy read will not trip over an expired signature;
+`url_expiration` (seconds, `aicspylibczi` mode) sets how long each one lasts.
+
+In `aicspylibczi` mode, `stream_options` configures the underlying curl stream, for
+example to set a timeout or authenticate to a protected endpoint:
+
+```python
+img = BioImage(
+    "https://example.com/private/image.czi",
+    use_aicspylibczi=True,
+    stream_options={"timeout": 60, "xoauth2_bearer": token},
+)
+```
+
+Remote reading in `aicspylibczi` mode requires an `aicspylibczi` built with libCZI's
+curl stream. Reading a remote CZI with a build that lacks it raises
+`UnsupportedFileFormatError` explaining as much; to check up front:
+
+```python
+from aicspylibczi import remote_reads_available
+
+remote_reads_available()
+```
 
 ### Individual tiles with aicspylibczi
 

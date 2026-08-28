@@ -1,11 +1,13 @@
+import contextlib
 import xml.etree.ElementTree as ET
-from typing import List, Tuple
+from typing import Any, ContextManager, List, Tuple
 
 import numpy as np
 import pytest
 from bioio_base import dimensions, exceptions, test_utilities
 
 from bioio_czi import Reader
+from bioio_czi.pylibczirw_reader import reader as pylibczirw_reader
 
 from .conftest import LOCAL_RESOURCES_DIR
 
@@ -199,6 +201,30 @@ def test_czi_reader_remote(url: str, expected_shape: Tuple[int]) -> None:
     # Construct full filepath
     reader = Reader(url)
     assert reader.shape == expected_shape
+
+    # Pixels come back too, without the whole 5684x5925 image crossing the network:
+    # libCZI asks for the byte ranges covering the requested window.
+    window = reader.get_image_data("YX", Y=slice(0, 32), X=slice(0, 32))
+    assert window.shape == (32, 32)
+    assert window.dtype == np.uint16
+
+
+def test_open_reads_local_paths_off_disk(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The counterpart to the test above: a local path must not be routed through
+    # the curl stream, which would turn a plain file read into a failed URL fetch.
+    opened: List[Tuple[str, Tuple[Any, ...]]] = []
+
+    def fake_open_czi(filepath: str, *args: Any) -> ContextManager[Any]:
+        opened.append((filepath, args))
+        return contextlib.nullcontext("czi-reader")
+
+    monkeypatch.setattr(pylibczirw_reader.czi, "open_czi", fake_open_czi)
+
+    path = str(LOCAL_RESOURCES_DIR / "s_1_t_1_c_1_z_1.czi")
+    with pylibczirw_reader.open(path):
+        pass
+
+    assert opened == [(path, ())]
 
 
 @pytest.mark.parametrize(

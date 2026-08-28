@@ -29,7 +29,7 @@ classifiers = [
 ]
 dynamic = ["version"]
 dependencies = [
-  "aicspylibczi>=3.2.1",
+  "aicspylibczi>=4.0.0",
   "aiohttp",
   "bioio-base>=3.4.0",
   "dask[array]>=2021.4.1",
@@ -60,6 +60,10 @@ test = [
   "pytest>=5.4.3",
   "pytest-cov>=2.9.0",
   "pytest-raises>=0.11",
+  # Presigning "s3://" URIs is done by fsspec, so reading one end to end needs the
+  # S3 filesystem installed. Not a runtime dependency: users install the filesystem
+  # for whichever object store they read from.
+  "s3fs",
 ]
 
 # entry points
