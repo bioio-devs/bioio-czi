@@ -77,6 +77,7 @@ class Reader(BaseReader):
     _mosaic_xarray_dask_data: Optional["xr.DataArray"] = None
     _mosaic_xarray_data: Optional["xr.DataArray"] = None
     _dims: Optional[Dimensions] = None
+    _dtype: Optional[np.dtype] = None
     _metadata: Optional[Any] = None
     _scenes: Optional[Tuple[str, ...]] = None
     _current_scene_index: int = 0
@@ -177,6 +178,7 @@ class Reader(BaseReader):
         self._mapped_dims = None
         self._px_sizes = None
         self._czi_scene_index = None
+        self._dtype = None
 
     @staticmethod
     def _fix_czi_dims(dims: str) -> str:
@@ -480,6 +482,27 @@ class Reader(BaseReader):
             Tuple of the image array's dimensions.
         """
         return self.dims.shape
+
+    @property
+    def dtype(self) -> np.dtype:
+        """
+        Data type of the image array's elements.
+
+        Returns
+        -------
+        dtype: np.dtype
+            Data-type of the image array's elements.
+        """
+        if self._dtype is None:
+            with self._fs.open(self._path) as open_resource:
+                czi = CziFile(open_resource.f)
+                pixel_type = PIXEL_DICT.get(czi.pixel_type)
+                if pixel_type is None:
+                    raise TypeError(
+                        f"Unsupported or unlabeled pixel type: {czi.pixel_type!r}"
+                    )
+            self._dtype = np.dtype(pixel_type)
+        return self._dtype
 
     def _read_indexed(self, given_dims: str, dim_specs: list) -> np.ndarray:
         """

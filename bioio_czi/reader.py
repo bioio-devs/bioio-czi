@@ -215,6 +215,18 @@ class Reader(BaseReader):
         """
         return self._implementation.dims
 
+    @property
+    def dtype(self) -> np.dtype:
+        """
+        Data type of the current scene's image array.
+
+        Returns
+        -------
+        dtype: np.dtype
+            Data-type of the image array's elements.
+        """
+        return self._implementation.dtype
+
     def _read_indexed(self, given_dims: str, dim_specs: list) -> np.ndarray:
         """
         Return the native-order array with ``dim_specs`` applied. This
