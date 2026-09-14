@@ -33,14 +33,14 @@ Install bioio-czi alongside bioio:
 
 | Feature                                             | pylibczirw mode | aicspylibczi mode |
 | --------------------------------------------------- | --------------- | ----------------- |
-| Read CZIs from the internet                         | ✅              | ❌                |
+| Read CZIs from the internet                         | ✅              | ✅                |
 | Read single tile from tiled CZI                     | ❌              | ✅                |
 | Read single tile's metadata from tiled CZI          | ❌              | ✅                |
 | Read elapsed time metadata\*                        | ❌              | ✅                |
 | Handle CZIs with different dimensions per scene\*\* | ❌              | ✅                |
 | Read stitched mosaic of a tiled CZI                 | ✅              | ✅                |
 
-The primary difference is that `pylibczirw` supports reading CZIs over the internet but cannot access individual tiles from a tiled CZI. To use `aicspylibczi`, add the `use_aicspylibczi=True` parameter when creating a reader. For example: `from bioio import BioImage; img = BioImage(..., use_aicspylibczi=True)`.
+The primary difference is that `pylibczirw` cannot access individual tiles or subblock metadata from a tiled CZI. To use `aicspylibczi`, add the `use_aicspylibczi=True` parameter when creating a reader. For example: `from bioio import BioImage; img = BioImage(..., use_aicspylibczi=True)`.
 
 \*Elapsed time metadata include the following. These are derived from individual subblock metadata.
 
@@ -66,7 +66,7 @@ img = BioImage(path)
 print(img.shape)  # (1, 1, 1, 5684, 5925)
 ```
 
-Note: accessing files from the internet is not available in `aicspylibczi` mode.
+Both modes read `http`/`https` URLs through libCZI's curl stream, which fetches only the byte ranges a read needs; the server must support range requests. In `aicspylibczi` mode the stitched mosaic is chunked one tile per chunk, so a window into `mosaic_dask_data` reads only the tiles beneath it.
 
 ### Individual tiles with aicspylibczi
 
@@ -84,6 +84,13 @@ print(img.get_image_data("TCZYX", M=3).shape)  # (2, 2, 3, 256, 256)
 ```
 
 The `M` dimension is used to select a specific tile.
+
+To read the metadata of just the subblocks you need, rather than all of them up front, use `get_subblock_metadata` with the same dimension arguments:
+
+```python
+subblocks = img.reader.get_subblock_metadata(T=0, M=3)
+print(len(subblocks.findall("Subblock")))  # 6
+```
 
 ### Stitched mosaic with pylibczirw
 

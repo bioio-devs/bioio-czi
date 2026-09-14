@@ -714,6 +714,11 @@ class Reader(BaseReader):
         """
         return None
 
+    def get_subblock_metadata(self, **kwargs: int) -> ET.Element:
+        raise NotImplementedError(
+            "Subblock metadata is only available with use_aicspylibczi=True."
+        )
+
 
 def open(filepath: str) -> ContextManager[czi.CziReader]:
     """

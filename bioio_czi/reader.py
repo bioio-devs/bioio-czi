@@ -98,8 +98,7 @@ class Reader(BaseReader):
             Path to image file.
         use_aicspylibczi: bool
             Read CZIs with the aicspylibczi library. Use aicspylibczi if you want to
-            read individual tiles from a scene. However, aicspylibczi cannot read files
-            over the internet. Default: False
+            read individual tiles from a scene or subblock metadata. Default: False
         chunk_dims: Union[str, List[str]]
             Ignored unless use_aicspylibczi is True.
             Which dimensions to create chunks for.
@@ -513,6 +512,19 @@ class Reader(BaseReader):
             when supported by the underlying implementation; otherwise, None.
         """
         return getattr(self._implementation, "acquisition_times", None)
+
+    def get_subblock_metadata(self, **kwargs: int) -> ElementTree.Element:
+        """
+        Read the metadata of the current scene's subblocks matching the given
+        dimension indices, e.g. ``T=0, C=1`` or ``M=3``, as a single ``Subblocks``
+        element. Only the matching subblocks are read from the file.
+
+        Raises
+        ------
+        NotImplementedError
+            The reader was not constructed with use_aicspylibczi=True.
+        """
+        return self._implementation.get_subblock_metadata(**kwargs)
 
     @property
     def time_interval(self) -> TimeInterval:
