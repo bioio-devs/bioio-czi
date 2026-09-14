@@ -181,6 +181,7 @@ def test_czi_reader(
         expected_channel_names=expected_channel_names,
         expected_physical_pixel_sizes=expected_physical_pixel_sizes,
         expected_metadata_type=ET.Element,
+        reader_kwargs={"use_aicspylibczi": False},
     )
 
 
@@ -197,7 +198,7 @@ def test_czi_reader(
 )
 def test_czi_reader_remote(url: str, expected_shape: Tuple[int]) -> None:
     # Construct full filepath
-    reader = Reader(url)
+    reader = Reader(url, use_aicspylibczi=False)
     assert reader.shape == expected_shape
 
 
@@ -218,7 +219,7 @@ def test_czi_reader_mosaic_coords(
     uri = LOCAL_RESOURCES_DIR / filename
 
     # Construct reader
-    reader = Reader(uri)
+    reader = Reader(uri, use_aicspylibczi=False)
 
     # Different from bioio-czi reader: the size of xarray_dask_data is the size of
     # a bounding box around all tiles in the scene, not just a single tile. (at the
@@ -253,7 +254,7 @@ def test_czi_reader_maps_bioio_scene_index_to_nonzero_czi_index() -> None:
 
     # Arrange
     uri = LOCAL_RESOURCES_DIR / "S=2_4x2_T=2=Z=3_CH=2.czi"
-    reader = Reader(uri)._implementation
+    reader = Reader(uri, use_aicspylibczi=False)._implementation
 
     # Use the real scene bounding rectangles from the file, but collapse them
     # so that only a single non-zero CZI index remains.
@@ -286,7 +287,7 @@ def test_scene_stack_consistency() -> None:
 
     # Arrange
     uri = LOCAL_RESOURCES_DIR / "w96_A1+A2.czi"
-    reader = Reader(uri)
+    reader = Reader(uri, use_aicspylibczi=False)
 
     # Ground Truth
     per_scene = []
@@ -325,7 +326,7 @@ def test_scene_stack_consistency() -> None:
 def test_ome_metadata_matches_exposed_shape_for_bounding_box_discrepant_czi() -> None:
     uri = LOCAL_RESOURCES_DIR / "ome_bounding_box_discrepant.czi"
 
-    reader = Reader(uri)
+    reader = Reader(uri, use_aicspylibczi=False)
 
     # Sanity check the exposed data view that triggered the bug report.
     assert reader.dims.order == "CZYX"
@@ -364,7 +365,9 @@ def test_get_image_data_matches_full_slice_pylibczirw(
 ) -> None:
     from bioio_base import transforms
 
-    reader = Reader(LOCAL_RESOURCES_DIR / filename)._implementation
+    reader = Reader(
+        LOCAL_RESOURCES_DIR / filename, use_aicspylibczi=False
+    )._implementation
     expected = transforms.reshape_data(reader.data, reader.dims.order, order, **kwargs)
     actual = reader.get_image_data(order, **kwargs)
     np.testing.assert_array_equal(actual, expected)
@@ -375,7 +378,9 @@ def test_get_image_data_reads_only_requested_planes_pylibczirw(
 ) -> None:
     from pylibCZIrw import czi as _pyczi
 
-    reader = Reader(LOCAL_RESOURCES_DIR / "s_3_t_1_c_3_z_5.czi")._implementation
+    reader = Reader(
+        LOCAL_RESOURCES_DIR / "s_3_t_1_c_3_z_5.czi", use_aicspylibczi=False
+    )._implementation
     # s_3_t_1_c_3_z_5: T=1, C=3, Z=5 -> dims CZYX. C=1 over Z=5 should read 5 planes.
     assert reader.dims.order == "CZYX"
 
@@ -408,7 +413,9 @@ def test_get_image_data_empty_selection_matches_full_slice(
 ) -> None:
     from bioio_base import transforms
 
-    reader = Reader(LOCAL_RESOURCES_DIR / filename)._implementation
+    reader = Reader(
+        LOCAL_RESOURCES_DIR / filename, use_aicspylibczi=False
+    )._implementation
     expected = transforms.reshape_data(reader.data, reader.dims.order, order, **kwargs)
     actual = reader.get_image_data(order, **kwargs)
 

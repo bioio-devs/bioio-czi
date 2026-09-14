@@ -89,7 +89,7 @@ class Reader(BaseReader):
         )
 
     def __init__(
-        self, image: PathLike, use_aicspylibczi: bool = False, **kwargs: Any
+        self, image: PathLike, use_aicspylibczi: bool = True, **kwargs: Any
     ) -> None:
         """
         Parameters
@@ -97,8 +97,9 @@ class Reader(BaseReader):
         image: types.PathLike
             Path to image file.
         use_aicspylibczi: bool
-            Read CZIs with the aicspylibczi library. Use aicspylibczi if you want to
-            read individual tiles from a scene or subblock metadata. Default: False
+            Read CZIs with the aicspylibczi library, which can read individual tiles
+            and subblock metadata. Set to False to read with pylibczirw instead.
+            Default: True
         chunk_dims: Union[str, List[str]]
             Ignored unless use_aicspylibczi is True.
             Which dimensions to create chunks for.
