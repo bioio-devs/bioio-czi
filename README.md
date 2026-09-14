@@ -68,6 +68,8 @@ print(img.shape)  # (1, 1, 1, 5684, 5925)
 
 Both modes read `http`/`https` URLs through libCZI's curl stream, which fetches only the byte ranges a read needs; the server must support range requests. In `aicspylibczi` mode the stitched mosaic is chunked one tile per chunk, so a window into `mosaic_dask_data` reads only the tiles beneath it.
 
+In `aicspylibczi` mode, `stream_options` configures the curl stream, for example `BioImage(url, stream_options={"timeout": 60, "xoauth2_bearer": token})` for an authenticated endpoint. See the [aicspylibczi README](https://github.com/bioio-devs/aicspylibczi#example-3-read-a-czi-from-a-remote-url) for the full list.
+
 ### Individual tiles
 
 ```python

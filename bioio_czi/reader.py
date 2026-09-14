@@ -114,7 +114,13 @@ class Reader(BaseReader):
         fs_kwargs: Dict[str, Any]
             Ignored unless use_aicspylibczi is True.
             Any specific keyword arguments to pass to the fsspec-created filesystem.
+            For http(s) URLs this only affects checking that the file exists.
             Default: {}
+        stream_options: Optional[Dict[str, Any]]
+            Ignored unless use_aicspylibczi is True.
+            libCZI curl stream options for http(s) URLs, e.g. ``{"timeout": 60}`` or
+            ``{"xoauth2_bearer": token}``. Ignored for local files.
+            Default: None
         """
         if use_aicspylibczi:
             self._implementation = AicsPyLibCziReader(image, **kwargs)
@@ -518,7 +524,8 @@ class Reader(BaseReader):
         """
         Read the metadata of the current scene's subblocks matching the given
         dimension indices, e.g. ``T=0, C=1`` or ``M=3``, as a single ``Subblocks``
-        element. Only the matching subblocks are read from the file.
+        element. Only the matching subblocks are read from the file. The scene is
+        the current scene; select it with set_scene rather than S.
 
         Raises
         ------

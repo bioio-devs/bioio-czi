@@ -8,10 +8,12 @@ from typing import Any, List, Tuple
 import numpy as np
 import pytest
 from _aicspylibczi import PylibCZI_CDimCoordinatesOverspecifiedException
+from aicspylibczi import CziFile
 from bioio_base import dimensions, exceptions, test_utilities
 from dateutil import parser
 
 from bioio_czi import Reader
+from bioio_czi.aicspylibczi_reader import reader as aicspylibczi_reader
 from bioio_czi.aicspylibczi_reader.reader import Reader as AicsPyLibCziReader
 
 from .conftest import LOCAL_RESOURCES_DIR
@@ -221,22 +223,35 @@ def test_czi_reader(
     )
 
 
-@pytest.mark.parametrize(
-    "url, expected_shape",
-    [
-        (
-            "https://allencell.s3.amazonaws.com/aics/hipsc_12x_overview_image_dataset/"
-            "stitchedwelloverviewimagepath/05080558_3500003720_10X_20191220_D3.czi"
-            "?versionId=_KYMRhRvKxnu727ssMD2_fZD5CmQMNw6",
-            (1, 1, 5684, 5925),
-        ),
-    ],
+REMOTE_URL = (
+    "https://allencell.s3.amazonaws.com/aics/hipsc_12x_overview_image_dataset/"
+    "stitchedwelloverviewimagepath/05080558_3500003720_10X_20191220_D3.czi"
+    "?versionId=_KYMRhRvKxnu727ssMD2_fZD5CmQMNw6"
 )
+
+
+@pytest.mark.parametrize("url, expected_shape", [(REMOTE_URL, (1, 1, 5684, 5925))])
 def test_czi_reader_remote(url: str, expected_shape: Tuple[int]) -> None:
     reader = Reader(url, use_aicspylibczi=True)
     assert reader.shape == expected_shape
     window = reader.get_image_data("YX", C=0, Y=slice(0, 32), X=slice(0, 32))
     assert window.shape == (32, 32)
+
+
+def test_czi_reader_remote_stream_options(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Options must reach the curl stream, not just the fsspec existence check.
+    opened = []
+
+    class FakeCziFile(CziFile):
+        def __init__(self, url: str, stream_options: dict) -> None:
+            opened.append(stream_options)
+
+    monkeypatch.setattr(aicspylibczi_reader, "CziFile", FakeCziFile)
+    aicspylibczi_reader._remote_czi.cache_clear()
+    Reader(REMOTE_URL, use_aicspylibczi=True, stream_options={"timeout": 5})
+
+    assert opened[0]["timeout"] == 5
+    assert opened[0]["ca_info"]
 
 
 def _normalize_entries(entries: List[dict[str, Any]]) -> List[dict[str, int | str]]:
@@ -815,6 +830,13 @@ def test_czi_reader_mosaic_window_matches_stitched(
         ("s_3_t_1_c_3_z_5.czi", None, {"C": 1}, 5),
         ("S=2_4x2_T=2=Z=3_CH=2.czi", "TR2", {"T": 0}, 48),
         ("S=2_4x2_T=2=Z=3_CH=2.czi", None, {"T": 1, "M": 3}, 6),
+        pytest.param(
+            "S=2_4x2_T=2=Z=3_CH=2.czi",
+            None,
+            {"S": 1},
+            None,
+            marks=pytest.mark.xfail(raises=ValueError),
+        ),
     ],
 )
 def test_get_subblock_metadata(

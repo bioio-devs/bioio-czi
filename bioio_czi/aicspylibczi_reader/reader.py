@@ -64,23 +64,26 @@ PIXEL_DICT = {
 
 
 @functools.lru_cache(maxsize=16)
-def _remote_czi(url: str) -> CziFile:
+def _remote_czi(url: str, stream_options: Tuple[Tuple[str, Any], ...]) -> CziFile:
     # The bundled libcurl has no usable default CA bundle on Linux; use certifi's.
-    return CziFile(url, stream_options={"ca_info": certifi.where()})
+    options = {"ca_info": certifi.where(), **dict(stream_options)}
+    return CziFile(url, stream_options=options)
 
 
 @contextmanager
-def open_czi(fs: AbstractFileSystem, path: str) -> Generator[CziFile, None, None]:
+def open_czi(
+    fs: AbstractFileSystem, path: str, stream_options: Optional[Dict[str, Any]] = None
+) -> Generator[CziFile, None, None]:
     """
     Yield a CziFile for ``path``. Local files are opened per call so no handle is
-    held between calls; http(s) URLs reuse one cached handle per URL, as opening
-    a remote CZI refetches its header, metadata and subblock directory.
+    held between calls; http(s) URLs reuse one cached handle per URL and options, as
+    opening a remote CZI refetches its header, metadata and subblock directory.
     """
     if isinstance(fs, LocalFileSystem):
         with fs.open(path) as open_resource:
             yield CziFile(open_resource.f)
     else:
-        yield _remote_czi(path)
+        yield _remote_czi(path, tuple(sorted((stream_options or {}).items())))
 
 
 class Reader(BaseReader):
@@ -118,7 +121,7 @@ class Reader(BaseReader):
                 "Only local paths and http(s) URLs are supported.",
             )
         try:
-            with open_czi(fs, path):
+            with open_czi(fs, path, kwargs.get("stream_options")):
                 return True
         except RuntimeError as e:
             raise exceptions.UnsupportedFileFormatError(
@@ -133,6 +136,7 @@ class Reader(BaseReader):
         chunk_dims: Union[str, List[str]] = DEFAULT_CHUNK_DIMS,
         include_subblock_metadata: bool = False,
         fs_kwargs: Dict[str, Any] = {},
+        stream_options: Optional[Dict[str, Any]] = None,
     ):
         """
         Parameters
@@ -150,7 +154,13 @@ class Reader(BaseReader):
             metadata.
         fs_kwargs: Dict[str, Any]
             Any specific keyword arguments to pass to the fsspec-created filesystem.
+            For http(s) URLs this only affects checking that the file exists; the
+            read itself is configured with stream_options.
             Default: {}
+        stream_options: Optional[Dict[str, Any]]
+            libCZI curl stream options for http(s) URLs, e.g. ``{"timeout": 60}`` or
+            ``{"xoauth2_bearer": token}``. Ignored for local files.
+            Default: None
         """
         # Expand details of provided image
         self._fs, self._path = io_utils.pathlike_to_fs(
@@ -166,6 +176,7 @@ class Reader(BaseReader):
         self.chunk_dims = chunk_dims
 
         self._include_subblock_metadata = include_subblock_metadata
+        self._stream_options = stream_options
 
         # Delayed storage
         self._px_sizes: Optional[types.PhysicalPixelSizes] = None
@@ -173,7 +184,9 @@ class Reader(BaseReader):
         self._czi_scene_index: Optional[int] = None
 
         # Enforce valid image
-        if not self._is_supported_image(self._fs, self._path):
+        if not self._is_supported_image(
+            self._fs, self._path, stream_options=stream_options
+        ):
             raise exceptions.UnsupportedFileFormatError(
                 self.__class__.__name__, self._path
             )
@@ -181,7 +194,7 @@ class Reader(BaseReader):
     @property
     def mapped_dims(self) -> str:
         if self._mapped_dims is None:
-            with open_czi(self._fs, self._path) as czi:
+            with open_czi(self._fs, self._path, self._stream_options) as czi:
                 self._mapped_dims = Reader._fix_czi_dims(czi.dims)
 
         return self._mapped_dims
@@ -213,7 +226,7 @@ class Reader(BaseReader):
             Tuple[str, ...]: Scene names/id
         """
         if self._scenes is None:
-            with open_czi(self._fs, self._path) as czi:
+            with open_czi(self._fs, self._path, self._stream_options) as czi:
                 xpath_str = "./Metadata/Information/Image/Dimensions/S/Scenes/Scene"
                 meta_scenes = czi.meta.findall(xpath_str)
                 scene_names: List[str] = []
@@ -352,9 +365,14 @@ class Reader(BaseReader):
         path: str,
         scene: int,
         read_dims: Optional[Dict[str, int]] = None,
+        stream_options: Optional[Dict[str, Any]] = None,
     ) -> np.ndarray:
         return Reader._get_image_data(
-            fs=fs, path=path, scene=scene, read_dims=read_dims
+            fs=fs,
+            path=path,
+            scene=scene,
+            read_dims=read_dims,
+            stream_options=stream_options,
         )[0]
 
     @staticmethod
@@ -363,6 +381,7 @@ class Reader(BaseReader):
         path: str,
         scene: int,
         read_dims: Optional[Dict[str, int]] = None,
+        stream_options: Optional[Dict[str, Any]] = None,
     ) -> Tuple[np.ndarray, List[Tuple[str, int]]]:
         """
         Read and return the squeezed image data requested along with the dimension info
@@ -388,7 +407,7 @@ class Reader(BaseReader):
             The dimension sizes that were returned from the read.
         """
         # Init czi and delegate to the shared single-plane read.
-        with open_czi(fs, path) as czi:
+        with open_czi(fs, path, stream_options) as czi:
             return Reader._read_plane(czi, scene, read_dims)
 
     @staticmethod
@@ -468,7 +487,7 @@ class Reader(BaseReader):
         """
         if self._dims is None:
             order = self.mapped_dims
-            with open_czi(self._fs, self._path) as czi:
+            with open_czi(self._fs, self._path, self._stream_options) as czi:
                 dims_shape = Reader._dims_shape_to_scene_dims_shape(
                     czi.get_dims_shape(),
                     self.current_scene_index,
@@ -505,7 +524,7 @@ class Reader(BaseReader):
             Data-type of the image array's elements.
         """
         if self._dtype is None:
-            with open_czi(self._fs, self._path) as czi:
+            with open_czi(self._fs, self._path, self._stream_options) as czi:
                 pixel_type = PIXEL_DICT.get(czi.pixel_type)
                 if pixel_type is None:
                     raise TypeError(
@@ -547,7 +566,7 @@ class Reader(BaseReader):
             spec for d, spec in zip(given_dims, dim_specs) if d in spatial
         )
 
-        with open_czi(self._fs, self._path) as czi:
+        with open_czi(self._fs, self._path, self._stream_options) as czi:
             dims_shape = Reader._dims_shape_to_scene_dims_shape(
                 czi.get_dims_shape(),
                 self.current_scene_index,
@@ -734,6 +753,7 @@ class Reader(BaseReader):
                     path=self._path,
                     scene=self.current_scene_index,
                     read_dims=this_chunk_read_dims,
+                    stream_options=self._stream_options,
                 ),
                 shape=sample_chunk_shape,
                 dtype=pixel_type,
@@ -804,7 +824,7 @@ class Reader(BaseReader):
         exceptions.UnsupportedFileFormatError
             The file could not be read or is not supported.
         """
-        with open_czi(self._fs, self._path) as czi:
+        with open_czi(self._fs, self._path, self._stream_options) as czi:
 
             dims_shape = Reader._dims_shape_to_scene_dims_shape(
                 dims_shape=czi.get_dims_shape(),
@@ -864,7 +884,7 @@ class Reader(BaseReader):
         exceptions.UnsupportedFileFormatError
             The file could not be read or is not supported.
         """
-        with open_czi(self._fs, self._path) as czi:
+        with open_czi(self._fs, self._path, self._stream_options) as czi:
             dims_shape = Reader._dims_shape_to_scene_dims_shape(
                 dims_shape=czi.get_dims_shape(),
                 scene_index=self.current_scene_index,
@@ -876,6 +896,7 @@ class Reader(BaseReader):
                 fs=self._fs,
                 path=self._path,
                 scene=self.current_scene_index,
+                stream_options=self._stream_options,
             )
 
             # Get metadata
@@ -905,12 +926,13 @@ class Reader(BaseReader):
         region: Tuple[int, int, int, int],
         shape: Tuple[int, ...],
         read_dims: Dict[str, int],
+        stream_options: Optional[Dict[str, Any]] = None,
     ) -> np.ndarray:
         """
         Composite one plane of the stitched mosaic over ``region`` (x, y, w, h).
         libCZI reads only the tiles intersecting the region.
         """
-        with open_czi(fs, path) as czi:
+        with open_czi(fs, path, stream_options) as czi:
             data = czi.read_mosaic(region=region, scale_factor=1.0, **read_dims)
         return data.reshape(shape)
 
@@ -950,7 +972,7 @@ class Reader(BaseReader):
         return (height, width)
 
     def _get_stitched_dask_mosaic(self) -> xr.DataArray:
-        with open_czi(self._fs, self._path) as czi:
+        with open_czi(self._fs, self._path, self._stream_options) as czi:
             planes, shape, bbox = self._mosaic_planes(czi)
 
         # One chunk per native tile, so a window into the mosaic reads only the
@@ -977,6 +999,7 @@ class Reader(BaseReader):
                     (bbox.x + x0, bbox.y + y0, chunk_shape[1], chunk_shape[0]),
                     chunk_shape,
                     planes[plane_index],
+                    self._stream_options,
                 ),
                 shape=chunk_shape,
                 dtype=self.dtype,
@@ -984,16 +1007,19 @@ class Reader(BaseReader):
         return self._construct_mosaic_xarray(da.block(blocks.tolist()))
 
     def _get_stitched_mosaic(self) -> xr.DataArray:
-        with open_czi(self._fs, self._path) as czi:
+        with open_czi(self._fs, self._path, self._stream_options) as czi:
             planes, shape, bbox = self._mosaic_planes(czi)
-            plane_shape = self._mosaic_plane_shape(bbox.h, bbox.w)
-            stitched = np.empty(shape + plane_shape, dtype=self.dtype)
-            for index, read_dims in planes.items():
-                stitched[index] = czi.read_mosaic(
-                    region=(bbox.x, bbox.y, bbox.w, bbox.h),
-                    scale_factor=1.0,
-                    **read_dims,
-                ).reshape(plane_shape)
+        plane_shape = self._mosaic_plane_shape(bbox.h, bbox.w)
+        stitched = np.empty(shape + plane_shape, dtype=self.dtype)
+        for index, read_dims in planes.items():
+            stitched[index] = Reader._read_mosaic_region(
+                self._fs,
+                self._path,
+                (bbox.x, bbox.y, bbox.w, bbox.h),
+                plane_shape,
+                read_dims,
+                self._stream_options,
+            )
         return self._construct_mosaic_xarray(stitched)
 
     def _construct_mosaic_xarray(self, stitched: types.ArrayLike) -> xr.DataArray:
@@ -1040,7 +1066,7 @@ class Reader(BaseReader):
         still uses the original plate-wide scene indices.
         """
         if self._czi_scene_index is None:
-            with open_czi(self._fs, self._path) as czi:
+            with open_czi(self._fs, self._path, self._stream_options) as czi:
                 self._czi_scene_index = Reader._adjust_scene_index(
                     czi.get_dims_shape(),
                     self.current_scene_index,
@@ -1112,7 +1138,7 @@ class Reader(BaseReader):
         if DimensionNames.MosaicTile not in self.dims.order:
             raise exceptions.UnexpectedShapeError("No mosaic dimension in image.")
 
-        with open_czi(self._fs, self._path) as czi:
+        with open_czi(self._fs, self._path, self._stream_options) as czi:
 
             # Default Channel and Time dimensions to 0 to improve
             # worst case read time for large files **only**
@@ -1154,7 +1180,7 @@ class Reader(BaseReader):
         if DimensionNames.MosaicTile not in self.dims.order:
             raise exceptions.UnexpectedShapeError("No mosaic dimension in image.")
 
-        with open_czi(self._fs, self._path) as czi:
+        with open_czi(self._fs, self._path, self._stream_options) as czi:
 
             tile_info_to_bboxes = czi.get_all_mosaic_tile_bounding_boxes(
                 S=self.czi_scene_index, **kwargs
@@ -1185,7 +1211,7 @@ class Reader(BaseReader):
             Returns None if extraction fails.
         """
 
-        with open_czi(self._fs, self._path) as czi:
+        with open_czi(self._fs, self._path, self._stream_options) as czi:
             return acquisition_times(
                 czi=czi,
                 current_scene=self.czi_scene_index,
@@ -1197,7 +1223,9 @@ class Reader(BaseReader):
         dimension indices, e.g. ``T=0, C=1`` or ``M=3``, as a single ``Subblocks``
         element. Only the matching subblocks are read from the file.
         """
-        with open_czi(self._fs, self._path) as czi:
+        if "S" in kwargs:
+            raise ValueError("Select the scene with set_scene rather than S.")
+        with open_czi(self._fs, self._path, self._stream_options) as czi:
             return czi.read_subblock_metadata(
                 unified_xml=True, S=self.czi_scene_index, **kwargs
             )
@@ -1252,7 +1280,7 @@ class Reader(BaseReader):
             return None
 
         try:
-            with open_czi(self._fs, self._path) as czi:
+            with open_czi(self._fs, self._path, self._stream_options) as czi:
                 duration_ms = time_between_subblocks(
                     czi,
                     self.czi_scene_index,
