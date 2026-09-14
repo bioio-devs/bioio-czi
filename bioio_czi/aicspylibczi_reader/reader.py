@@ -1,7 +1,9 @@
 import functools
 import itertools
 import logging
+import threading
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from copy import copy
 from datetime import datetime, timedelta
@@ -1222,10 +1224,71 @@ class Reader(BaseReader):
         """
         if "S" in kwargs:
             raise ValueError("Select the scene with set_scene rather than S.")
+        # For remote mosaic files without an M constraint, libCZI's curl stream
+        # issues one HTTP round trip per tile serially (~0.45 s each). Fan the
+        # reads across a thread pool so all tiles are fetched concurrently.
+        if (
+            not isinstance(self._fs, LocalFileSystem)
+            and "M" not in kwargs
+            and DimensionNames.MosaicTile in self.dims.order
+        ):
+            return self._get_subblock_metadata_parallel(**kwargs)
         with open_czi(self._fs, self._path, self._stream_options) as czi:
             return czi.read_subblock_metadata(
                 unified_xml=True, S=self.czi_scene_index, **kwargs
             )
+
+    def _get_subblock_metadata_parallel(self, **kwargs: int) -> ET.Element:
+        """
+        Fan out read_subblock_metadata(M=i) across a thread pool.
+
+        The lru_cache on _remote_czi returns a single shared CziFile, and
+        libCZI's curl stream serializes all reads on that handle. Each worker
+        thread therefore keeps its own fresh CziFile (thread-local) so that up
+        to max_workers HTTP range requests can be in flight simultaneously.
+        """
+        with open_czi(self._fs, self._path, self._stream_options) as czi:
+            dims_shape = Reader._dims_shape_to_scene_dims_shape(
+                czi.get_dims_shape(), self.current_scene_index, czi.shape_is_consistent
+            )
+        m_begin, m_size = dims_shape["M"]
+        scene = self.czi_scene_index
+        path = self._path
+        # Rebuild the options dict that _remote_czi would have used.
+        czi_options = {"ca_info": certifi.where(), **(self._stream_options or {})}
+        tls: threading.local = threading.local()
+
+        def fetch_one(m_abs: int) -> list:
+            # One fresh handle per thread; reused across its assigned M indices.
+            if not hasattr(tls, "czi"):
+                tls.czi = CziFile(path, stream_options=czi_options)
+            return tls.czi.read_subblock_metadata(
+                unified_xml=False, S=scene, M=m_abs, **kwargs
+            )
+
+        max_workers = min(m_size, 32)
+        ordered: List[Optional[list]] = [None] * m_size
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(fetch_one, m_begin + j): j for j in range(m_size)
+            }
+            for future in as_completed(futures):
+                ordered[futures[future]] = future.result()
+
+        # Assemble into the unified XML format aicspylibczi produces.
+        root = ET.Element("Subblocks")
+        for subblock_list in ordered:
+            if not subblock_list:
+                continue
+            for dims_dict, xml_str in subblock_list:
+                el = ET.Element("Subblock")
+                for dim, number in dims_dict.items():
+                    el.set(dim, str(number))
+                if "S" not in dims_dict:
+                    el.set("S", "0")
+                el.append(ET.XML(xml_str))
+                root.append(el)
+        return root
 
     @property
     def time_interval(self) -> Optional[timedelta]:
