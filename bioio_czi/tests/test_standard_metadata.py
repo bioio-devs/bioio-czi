@@ -8,16 +8,10 @@ from bioio_czi import Reader
 from .conftest import LOCAL_RESOURCES_DIR
 
 
-# Test each each of the following files in both aicspylibczi and pylibczirw modes.
-#   variable_per_scene_dims.czi
-#   OverViewScan.czi
-# S=2_4x2_T=2=Z=3_CH=2.czi is only tested in aicspylibczi mode since it is used mainly
-# for testing duration and interval, which aren't available in pylibczirw mode.
 @pytest.mark.parametrize(
-    "use_aicspylibczi, filename, expected",
+    "filename, expected",
     [
         (
-            True,
             "variable_per_scene_dims.czi",
             {
                 "Binning": "1x1",
@@ -46,7 +40,6 @@ from .conftest import LOCAL_RESOURCES_DIR
             },
         ),
         (
-            True,
             "OverViewScan.czi",
             {
                 "Binning": "Other",
@@ -75,7 +68,6 @@ from .conftest import LOCAL_RESOURCES_DIR
             },
         ),
         (
-            True,
             "S=2_4x2_T=2=Z=3_CH=2.czi",
             {
                 "Binning": "1x1",
@@ -101,73 +93,11 @@ from .conftest import LOCAL_RESOURCES_DIR
                 "Total Time Duration": datetime.timedelta(milliseconds=19160.1933),
             },
         ),
-        (
-            False,
-            "variable_per_scene_dims.czi",
-            {
-                "Binning": "1x1",
-                "Column": "4",
-                "Dimensions Present": "TCZYX",
-                "Image Size C": 1,
-                "Image Size T": 2,
-                "Image Size X": 1848,
-                "Image Size Y": 1248,
-                "Image Size Z": 2,
-                "Imaged By": "sara.carlson",
-                "Imaging Datetime": datetime.datetime(
-                    2020, 1, 18, 0, 16, 29, 771361, tzinfo=datetime.timezone.utc
-                ),
-                "Objective": "10x/0.45Air",
-                "Pixel Size X": 0.5416666666666666,
-                "Pixel Size Y": 0.5416666666666666,
-                "Pixel Size Z": 2.23,
-                "Position Index": 1,
-                "Row": "4",
-                "Stage Position X": 32056.045,
-                "Stage Position Y": 31179.085,
-                "Timelapse": True,
-                "Timelapse Interval": None,  # Available only in aicspylibczi mode
-                "Total Time Duration": None,  # Available only in aicspylibczi mode
-            },
-        ),
-        (
-            False,
-            "OverViewScan.czi",
-            {
-                "Binning": "Other",
-                "Column": None,
-                "Dimensions Present": "CYX",  # aicspylibczi mode has CMYX
-                "Image Size C": 1,
-                "Image Size T": None,
-                # This image is larger in X and Y when using pylibczirw mode than
-                # aicspylibczi mode because all the tiles are stitched together.
-                "Image Size X": 7398,
-                "Image Size Y": 3212,
-                "Image Size Z": None,
-                "Imaged By": "M1SRH",
-                "Imaging Datetime": datetime.datetime(
-                    2016, 3, 11, 10, 23, 44, 925154, tzinfo=datetime.timezone.utc
-                ),
-                "Objective": "5x/0.35Air",
-                "Pixel Size X": 4.5743626119409,
-                "Pixel Size Y": 4.5743626119409,
-                "Pixel Size Z": None,
-                "Position Index": None,
-                "Row": None,
-                "Stage Position X": 43832.037,
-                "Stage Position Y": 14634.984,
-                "Timelapse": False,
-                "Timelapse Interval": None,  # Available only in aicspylibczi mode
-                "Total Time Duration": None,  # Available only in aicspylibczi mode
-            },
-        ),
     ],
 )
-def test_standard_metadata(
-    use_aicspylibczi: bool, filename: str, expected: dict[str, Any]
-) -> None:
+def test_standard_metadata(filename: str, expected: dict[str, Any]) -> None:
     uri = LOCAL_RESOURCES_DIR / filename
-    reader = Reader(uri, use_aicspylibczi=use_aicspylibczi)
+    reader = Reader(uri)
     metadata = reader.standard_metadata.to_dict()
 
     # Compare each key's values.
@@ -182,10 +112,9 @@ def test_standard_metadata(
 # These test cases are specifically to check that standard_metadata reports metadata
 # of the user-selected scene.
 @pytest.mark.parametrize(
-    "use_aicspylibczi, filename, scene, expected",
+    "filename, scene, expected",
     [
         (
-            True,
             "variable_per_scene_dims.czi",
             0,
             {
@@ -195,7 +124,6 @@ def test_standard_metadata(
             },
         ),
         (
-            True,
             "variable_per_scene_dims.czi",
             1,
             {
@@ -204,32 +132,14 @@ def test_standard_metadata(
                 "Total Time Duration": None,
             },
         ),
-        (
-            False,
-            "variable_per_scene_dims.czi",
-            0,
-            {
-                "Image Size T": 2,
-            },
-        ),
-        (
-            False,
-            "variable_per_scene_dims.czi",
-            1,
-            {
-                # This should be 1, but pylibczirw assumes all scenes have the same
-                # shape, so this is a known defect of pylibczirw mode.
-                "Image Size T": 2,
-            },
-        ),
     ],
 )
 def test_standard_metadata_with_set_scene(
-    use_aicspylibczi: bool, filename: str, scene: int, expected: dict[str, Any]
+    filename: str, scene: int, expected: dict[str, Any]
 ) -> None:
     # Arrange
     uri = LOCAL_RESOURCES_DIR / filename
-    reader = Reader(uri, use_aicspylibczi=use_aicspylibczi)
+    reader = Reader(uri)
 
     # Act
     reader.set_scene(scene)
