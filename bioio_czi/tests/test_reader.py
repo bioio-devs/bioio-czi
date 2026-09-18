@@ -940,3 +940,11 @@ def test_use_aicspylibczi_false_raises() -> None:
     uri = LOCAL_RESOURCES_DIR / "S=2_4x2_T=2=Z=3_CH=2.czi"
     with pytest.raises(ValueError):
         Reader(uri, use_aicspylibczi=False)
+
+
+def test_use_aicspylibczi_none_does_not_raise() -> None:
+    # Only an explicit False requests the removed backend; None is not that.
+    uri = LOCAL_RESOURCES_DIR / "S=2_4x2_T=2=Z=3_CH=2.czi"
+    with pytest.warns(DeprecationWarning):
+        reader = Reader(uri, use_aicspylibczi=None)
+    assert reader.name == "bioio-czi-aicspylibczi"

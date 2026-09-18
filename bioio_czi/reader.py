@@ -171,7 +171,7 @@ class Reader(BaseReader):
             has been removed.
         """
         if use_aicspylibczi is not _USE_AICSPYLIBCZI_UNSET:
-            if not use_aicspylibczi:
+            if use_aicspylibczi is False:
                 raise ValueError(
                     "The pylibczirw backend has been removed; use_aicspylibczi=False "
                     "is no longer supported. bioio-czi now always uses aicspylibczi."
@@ -1377,8 +1377,7 @@ class Reader(BaseReader):
         via super() and then assigns the new values.
         """
         # 1. Some of the standard metadata can be read from all bioio Readers in the
-        # same way, which the following super() call does. For instance,
-        # standard_metadata.timelapse_interval is set to self.time_interval.
+        # same way, which the following super() call does (e.g. binning, objective).
         metadata = super().standard_metadata
 
         # 2. The self-contained standard_metadata module holds the logic for
@@ -1392,7 +1391,9 @@ class Reader(BaseReader):
         metadata.stage_position_x, metadata.stage_position_y = (
             standard_metadata_utils.scene_stage_position(self.metadata, czi_scene_index)
         )
-        # 3. Finally, total_time_duration is derived from the subblock metadata.
+        # 3. Override timelapse_interval and total_time_duration with the
+        # subblock-derived values: super() sets timelapse_interval from the OME
+        # transform, but the CZI subblock timing (self.time_interval) is preferred.
         metadata.timelapse_interval = self.time_interval
         metadata.total_time_duration = self.total_time_duration
 
