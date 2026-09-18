@@ -13,8 +13,7 @@ from bioio_base import dimensions, exceptions, test_utilities
 from dateutil import parser
 
 from bioio_czi import Reader
-from bioio_czi.aicspylibczi_reader import reader as aicspylibczi_reader
-from bioio_czi.aicspylibczi_reader.reader import Reader as AicsPyLibCziReader
+from bioio_czi import reader as czi_reader
 
 from .conftest import LOCAL_RESOURCES_DIR
 
@@ -244,8 +243,8 @@ def test_czi_reader_remote_stream_options(monkeypatch: pytest.MonkeyPatch) -> No
         def __init__(self, url: str, stream_options: dict) -> None:
             opened.append(stream_options)
 
-    monkeypatch.setattr(aicspylibczi_reader, "CziFile", FakeCziFile)
-    aicspylibczi_reader._remote_czi.cache_clear()
+    monkeypatch.setattr(czi_reader, "CziFile", FakeCziFile)
+    czi_reader._remote_czi.cache_clear()
     Reader(REMOTE_URL, stream_options={"timeout": 5})
 
     assert opened[0]["timeout"] == 5
@@ -871,7 +870,7 @@ def test_get_image_data_matches_full_slice_aics(
 ) -> None:
     from bioio_base import transforms
 
-    reader = Reader(LOCAL_RESOURCES_DIR / filename)._implementation
+    reader = Reader(LOCAL_RESOURCES_DIR / filename)
     expected = transforms.reshape_data(reader.data, reader.dims.order, order, **kwargs)
     actual = reader.get_image_data(order, **kwargs)
     np.testing.assert_array_equal(actual, expected)
@@ -880,18 +879,18 @@ def test_get_image_data_matches_full_slice_aics(
 def test_get_image_data_reads_only_requested_planes_aics(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    reader = Reader(LOCAL_RESOURCES_DIR / "s_3_t_1_c_3_z_5.czi")._implementation
+    reader = Reader(LOCAL_RESOURCES_DIR / "s_3_t_1_c_3_z_5.czi")
     # s_3_t_1_c_3_z_5: T=1, C=3, Z=5 -> dims CZYX. C=1 over Z=5 -> 5 plane reads.
     assert reader.dims.order == "CZYX"
 
     calls = {"n": 0}
-    real_plane = AicsPyLibCziReader._read_plane
+    real_plane = Reader._read_plane
 
     def counting_plane(czi: Any, scene: int, read_dims: Any = None) -> Any:
         calls["n"] += 1
         return real_plane(czi, scene, read_dims)
 
-    monkeypatch.setattr(AicsPyLibCziReader, "_read_plane", staticmethod(counting_plane))
+    monkeypatch.setattr(Reader, "_read_plane", staticmethod(counting_plane))
     reader.get_image_data("ZYX", C=1)
     assert calls["n"] == 5
 
@@ -913,7 +912,7 @@ def test_get_image_data_empty_selection_matches_full_slice_aics(
 ) -> None:
     from bioio_base import transforms
 
-    reader = Reader(LOCAL_RESOURCES_DIR / filename)._implementation
+    reader = Reader(LOCAL_RESOURCES_DIR / filename)
     expected = transforms.reshape_data(reader.data, reader.dims.order, order, **kwargs)
     actual = reader.get_image_data(order, **kwargs)
 
