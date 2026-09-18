@@ -1,7 +1,6 @@
 import pytest
 
 from bioio_czi import Reader
-from bioio_czi.aicspylibczi_reader.reader import Reader as AicsPyLibCziRwReader
 
 from .conftest import LOCAL_RESOURCES_DIR
 
@@ -14,7 +13,8 @@ def test_reads_with_aicspylibczi() -> None:
     reader = Reader(uri)
 
     # Assert
-    assert isinstance(reader._implementation, AicsPyLibCziRwReader)
+    assert isinstance(reader, Reader)
+    assert reader.name == "bioio-czi-aicspylibczi"
 
 
 def test_use_aicspylibczi_true_is_deprecated() -> None:
@@ -25,7 +25,7 @@ def test_use_aicspylibczi_true_is_deprecated() -> None:
     with pytest.warns(DeprecationWarning):
         reader = Reader(uri, use_aicspylibczi=True)
 
-    assert isinstance(reader._implementation, AicsPyLibCziRwReader)
+    assert reader.name == "bioio-czi-aicspylibczi"
 
 
 def test_use_aicspylibczi_false_raises() -> None:
