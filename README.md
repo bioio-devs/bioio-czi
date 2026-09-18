@@ -5,7 +5,7 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Python 3.10–3.13](https://img.shields.io/badge/python-3.10--3.13-blue.svg)](https://www.python.org/downloads/)
 
-A BioIO reader plugin for reading CZIs using `pylibczirw` (default) or `aicspylibczi`.
+A BioIO reader plugin for reading CZIs using `aicspylibczi` (default) or `pylibczirw`.
 
 ---
 
@@ -29,18 +29,18 @@ Install bioio-czi alongside bioio:
 
 ## pylibczirw vs. aicspylibczi
 
-`bioio-czi` can operate in [pylibczirw](https://github.com/ZEISS/pylibczirw) mode (the default) or [aicspylibczi](https://github.com/bioio-devs/aicspylibczi) mode.
+`bioio-czi` can operate in [aicspylibczi](https://github.com/bioio-devs/aicspylibczi) mode (the default) or [pylibczirw](https://github.com/ZEISS/pylibczirw) mode.
 
 | Feature                                             | pylibczirw mode | aicspylibczi mode |
 | --------------------------------------------------- | --------------- | ----------------- |
-| Read CZIs from the internet                         | ✅              | ❌                |
+| Read CZIs from the internet                         | ✅              | ✅                |
 | Read single tile from tiled CZI                     | ❌              | ✅                |
 | Read single tile's metadata from tiled CZI          | ❌              | ✅                |
 | Read elapsed time metadata\*                        | ❌              | ✅                |
 | Handle CZIs with different dimensions per scene\*\* | ❌              | ✅                |
 | Read stitched mosaic of a tiled CZI                 | ✅              | ✅                |
 
-The primary difference is that `pylibczirw` supports reading CZIs over the internet but cannot access individual tiles from a tiled CZI. To use `aicspylibczi`, add the `use_aicspylibczi=True` parameter when creating a reader. For example: `from bioio import BioImage; img = BioImage(..., use_aicspylibczi=True)`.
+The primary difference is that `pylibczirw` cannot access individual tiles or subblock metadata from a tiled CZI. To use `pylibczirw`, add the `use_aicspylibczi=False` parameter when creating a reader. For example: `from bioio import BioImage; img = BioImage(..., use_aicspylibczi=False)`.
 
 \*Elapsed time metadata include the following. These are derived from individual subblock metadata.
 
@@ -66,16 +66,17 @@ img = BioImage(path)
 print(img.shape)  # (1, 1, 1, 5684, 5925)
 ```
 
-Note: accessing files from the internet is not available in `aicspylibczi` mode.
+Both modes read `http`/`https` URLs through libCZI's curl stream, which fetches only the byte ranges a read needs; the server must support range requests. In `aicspylibczi` mode the stitched mosaic is chunked one tile per chunk, so a window into `mosaic_dask_data` reads only the tiles beneath it.
 
-### Individual tiles with aicspylibczi
+In `aicspylibczi` mode, `stream_options` configures the curl stream, for example `BioImage(url, stream_options={"timeout": 60, "xoauth2_bearer": token})` for an authenticated endpoint. See the [aicspylibczi README](https://github.com/bioio-devs/aicspylibczi#example-3-read-a-czi-from-a-remote-url) for the full list.
+
+### Individual tiles
 
 ```python
 img = BioImage(
     "S=2_4x2_T=2=Z=3_CH=2.czi",
     reconstruct_mosaic=False,
     include_subblock_metadata=True,
-    use_aicspylibczi=True
 )
 print(img.dims)  # <Dimensions [M: 8, T: 2, C: 2, Z: 3, Y: 256, X: 256]>
 subblocks = img.metadata.findall("./Subblocks/Subblock")
@@ -85,7 +86,14 @@ print(img.get_image_data("TCZYX", M=3).shape)  # (2, 2, 3, 256, 256)
 
 The `M` dimension is used to select a specific tile.
 
-### Stitched mosaic with pylibczirw
+To read the metadata of just the subblocks you need, rather than all of them up front, use `get_subblock_metadata` with the same dimension arguments:
+
+```python
+subblocks = img.reader.get_subblock_metadata(T=0, M=3)
+print(len(subblocks.findall("Subblock")))  # 6
+```
+
+### Stitched mosaic
 
 ```python
 img = BioImage("S=2_4x2_T=2=Z=3_CH=2.czi")

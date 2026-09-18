@@ -8,10 +8,12 @@ from typing import Any, List, Tuple
 import numpy as np
 import pytest
 from _aicspylibczi import PylibCZI_CDimCoordinatesOverspecifiedException
+from aicspylibczi import CziFile
 from bioio_base import dimensions, exceptions, test_utilities
 from dateutil import parser
 
 from bioio_czi import Reader
+from bioio_czi.aicspylibczi_reader import reader as aicspylibczi_reader
 from bioio_czi.aicspylibczi_reader.reader import Reader as AicsPyLibCziReader
 
 from .conftest import LOCAL_RESOURCES_DIR
@@ -221,17 +223,34 @@ def test_czi_reader(
     )
 
 
-@pytest.mark.xfail(
-    raises=exceptions.UnsupportedFileFormatError,
-    reason="Do not support remote CZI reading in aicspylibczi mode",
+REMOTE_URL = (
+    "https://allencell.s3.amazonaws.com/aics/hipsc_12x_overview_image_dataset/"
+    "stitchedwelloverviewimagepath/05080558_3500003720_10X_20191220_D3.czi"
+    "?versionId=_KYMRhRvKxnu727ssMD2_fZD5CmQMNw6"
 )
-def test_czi_reader_remote_xfail() -> None:
-    # Construct full filepath
-    uri = (
-        "https://allencell.s3.amazonaws.com/aics/hipsc_12x_overview_image_dataset/"
-        "stitchedwelloverviewimagepath/05080558_3500003720_10X_20191220_D3.czi"
-    )
-    Reader(uri, use_aicspylibczi=True)
+
+
+@pytest.mark.parametrize("url, expected_shape", [(REMOTE_URL, (1, 1, 5684, 5925))])
+def test_czi_reader_remote(url: str, expected_shape: Tuple[int]) -> None:
+    reader = Reader(url, use_aicspylibczi=True)
+    assert reader.shape == expected_shape
+    window = reader.get_image_data("YX", C=0, Y=slice(0, 32), X=slice(0, 32))
+    assert window.shape == (32, 32)
+
+
+def test_czi_reader_remote_stream_options(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Options must reach the curl stream, not just the fsspec existence check.
+    opened = []
+
+    class FakeCziFile(CziFile):
+        def __init__(self, url: str, stream_options: dict) -> None:
+            opened.append(stream_options)
+
+    monkeypatch.setattr(aicspylibczi_reader, "CziFile", FakeCziFile)
+    aicspylibczi_reader._remote_czi.cache_clear()
+    Reader(REMOTE_URL, use_aicspylibczi=True, stream_options={"timeout": 5})
+
+    assert opened[0]["timeout"] == 5
 
 
 def _normalize_entries(entries: List[dict[str, Any]]) -> List[dict[str, int | str]]:
@@ -775,57 +794,62 @@ def test_czi_reader_mosaic_coords(
     )
 
 
-def test_czi_reader_stitch_tiles_clamps_bbox_mismatch() -> None:
-    """
-    Test to ensure _stitch_tiles can handle a tile whose actual
-    Y/X size is smaller than the bounding box region.
-    """
+@pytest.mark.parametrize(
+    "filename, set_scene",
+    [
+        ("OverViewScan.czi", "TR1"),
+        # Scene whose bounding box is offset within the mosaic
+        ("S=2_4x2_T=2=Z=3_CH=2.czi", "TR2"),
+        # Mosaic whose origin is far from (0, 0)
+        ("mosaic_split_plate_scene_index_offset.czi", "B7-B7"),
+        ("variable_scene_shape_first_scene_pyramid.czi", "A1-A1"),
+    ],
+)
+def test_czi_reader_mosaic_window_matches_stitched(
+    filename: str, set_scene: str
+) -> None:
+    reader = Reader(LOCAL_RESOURCES_DIR / filename, use_aicspylibczi=True)
+    reader.set_scene(set_scene)
+    window = (..., slice(100, 700), slice(200, 900))
 
-    # Fake tile data: shape (C, Y, X) = (1, 4, 5)
-    tile_data = np.arange(1 * 4 * 5, dtype=np.uint16).reshape((1, 4, 5))
-
-    data = tile_data
-    data_dims = "CYX"
-    data_dims_shape = {
-        "C": (0, 1),
-        dimensions.DimensionNames.SpatialY: (0, 4),
-        dimensions.DimensionNames.SpatialX: (0, 5),
-    }
-
-    class DummyTileInfo:
-        def __init__(self) -> None:
-            self.dimension_coordinates = {
-                "C": 0,
-                dimensions.DimensionNames.SpatialY: 0,
-                dimensions.DimensionNames.SpatialX: 0,
-            }
-
-    class DummyBBox:
-        def __init__(self, x: int, y: int, w: int, h: int) -> None:
-            self.x = x
-            self.y = y
-            self.w = w
-            self.h = h
-
-    tile_info = DummyTileInfo()
-
-    # Final mosaic is larger than tile: h=6, w=8
-    final_bbox = DummyBBox(x=0, y=0, w=8, h=6)
-    tile_bbox = DummyBBox(x=0, y=0, w=8, h=6)
-
-    stitched = AicsPyLibCziReader._stitch_tiles(
-        data=data,
-        data_dims=data_dims,
-        data_dims_shape=data_dims_shape,
-        tile_bboxes={tile_info: tile_bbox},
-        final_bbox=final_bbox,
+    # One chunk per tile so a window reads only the tiles beneath it
+    tile_dims = reader.mosaic_tile_dims
+    assert tile_dims is not None
+    assert reader.mosaic_dask_data.chunks[-2][0] == tile_dims.Y
+    assert reader.mosaic_dask_data.chunks[-1][0] == tile_dims.X
+    np.testing.assert_array_equal(
+        reader.mosaic_dask_data[window].compute(), reader.mosaic_data[window]
     )
 
-    # mosaic shape should follow final bbox (C, Y, X) = (1, 6, 8)
-    assert stitched.shape == (1, 6, 8)
 
-    # The overlapping region should match the original tile data
-    np.testing.assert_array_equal(stitched[:, 0:4, 0:5], tile_data)
+@pytest.mark.parametrize(
+    "filename, set_scene, kwargs, expected_count",
+    [
+        ("s_1_t_1_c_1_z_1.czi", None, {}, 1),
+        ("s_3_t_1_c_3_z_5.czi", None, {"C": 1}, 5),
+        ("S=2_4x2_T=2=Z=3_CH=2.czi", "TR2", {"T": 0}, 48),
+        ("S=2_4x2_T=2=Z=3_CH=2.czi", None, {"T": 1, "M": 3}, 6),
+        pytest.param(
+            "S=2_4x2_T=2=Z=3_CH=2.czi",
+            None,
+            {"S": 1},
+            None,
+            marks=pytest.mark.xfail(raises=ValueError),
+        ),
+    ],
+)
+def test_get_subblock_metadata(
+    filename: str, set_scene: str | None, kwargs: dict, expected_count: int
+) -> None:
+    reader = Reader(LOCAL_RESOURCES_DIR / filename, use_aicspylibczi=True)
+    if set_scene is not None:
+        reader.set_scene(set_scene)
+
+    subblocks = reader.get_subblock_metadata(**kwargs).findall("Subblock")
+
+    assert len(subblocks) == expected_count
+    assert all(subblocks[0].get(dim) == str(index) for dim, index in kwargs.items())
+    assert subblocks[0].find(".//AcquisitionTime") is not None
 
 
 # ---------------------------------------------------------------------------

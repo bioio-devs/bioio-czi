@@ -89,7 +89,7 @@ class Reader(BaseReader):
         )
 
     def __init__(
-        self, image: PathLike, use_aicspylibczi: bool = False, **kwargs: Any
+        self, image: PathLike, use_aicspylibczi: bool = True, **kwargs: Any
     ) -> None:
         """
         Parameters
@@ -97,9 +97,9 @@ class Reader(BaseReader):
         image: types.PathLike
             Path to image file.
         use_aicspylibczi: bool
-            Read CZIs with the aicspylibczi library. Use aicspylibczi if you want to
-            read individual tiles from a scene. However, aicspylibczi cannot read files
-            over the internet. Default: False
+            Read CZIs with the aicspylibczi library, which can read individual tiles
+            and subblock metadata. Set to False to read with pylibczirw instead.
+            Default: True
         chunk_dims: Union[str, List[str]]
             Ignored unless use_aicspylibczi is True.
             Which dimensions to create chunks for.
@@ -114,7 +114,13 @@ class Reader(BaseReader):
         fs_kwargs: Dict[str, Any]
             Ignored unless use_aicspylibczi is True.
             Any specific keyword arguments to pass to the fsspec-created filesystem.
+            For http(s) URLs this only affects checking that the file exists.
             Default: {}
+        stream_options: Optional[Dict[str, Any]]
+            Ignored unless use_aicspylibczi is True.
+            libCZI curl stream options for http(s) URLs, e.g. ``{"timeout": 60}`` or
+            ``{"xoauth2_bearer": token}``. Ignored for local files.
+            Default: None
         """
         if use_aicspylibczi:
             self._implementation = AicsPyLibCziReader(image, **kwargs)
@@ -513,6 +519,20 @@ class Reader(BaseReader):
             when supported by the underlying implementation; otherwise, None.
         """
         return getattr(self._implementation, "acquisition_times", None)
+
+    def get_subblock_metadata(self, **kwargs: int) -> ElementTree.Element:
+        """
+        Read the metadata of the current scene's subblocks matching the given
+        dimension indices, e.g. ``T=0, C=1`` or ``M=3``, as a single ``Subblocks``
+        element. Only the matching subblocks are read from the file. The scene is
+        the current scene; select it with set_scene rather than S.
+
+        Raises
+        ------
+        NotImplementedError
+            The reader was not constructed with use_aicspylibczi=True.
+        """
+        return self._implementation.get_subblock_metadata(**kwargs)
 
     @property
     def time_interval(self) -> TimeInterval:
