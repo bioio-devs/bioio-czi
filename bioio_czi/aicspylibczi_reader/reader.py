@@ -1254,8 +1254,8 @@ class Reader(BaseReader):
         m_begin, m_size = dims_shape["M"]
         scene = self.czi_scene_index
         path = self._path
-        # Rebuild the options dict that _remote_czi would have used.
-        czi_options = {"ca_info": certifi.where(), **(self._stream_options or {})}
+        # Same options _remote_czi would have used.
+        czi_options = dict(self._stream_options or {})
         tls: threading.local = threading.local()
 
         def fetch_one(m_abs: int) -> list:
