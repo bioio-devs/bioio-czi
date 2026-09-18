@@ -41,7 +41,6 @@ def test_subblocks(filename: str, num_subblocks: int, acquistion_time: str) -> N
     reader = Reader(
         LOCAL_RESOURCES_DIR / filename,
         include_subblock_metadata=True,
-        use_aicspylibczi=True,
     )
 
     subblocks = reader.metadata.findall("./Subblocks/Subblock")
@@ -219,7 +218,6 @@ def test_czi_reader(
         expected_channel_names=expected_channel_names,
         expected_physical_pixel_sizes=expected_physical_pixel_sizes,
         expected_metadata_type=ET.Element,
-        reader_kwargs={"use_aicspylibczi": True},
     )
 
 
@@ -232,7 +230,7 @@ REMOTE_URL = (
 
 @pytest.mark.parametrize("url, expected_shape", [(REMOTE_URL, (1, 1, 5684, 5925))])
 def test_czi_reader_remote(url: str, expected_shape: Tuple[int]) -> None:
-    reader = Reader(url, use_aicspylibczi=True)
+    reader = Reader(url)
     assert reader.shape == expected_shape
     window = reader.get_image_data("YX", C=0, Y=slice(0, 32), X=slice(0, 32))
     assert window.shape == (32, 32)
@@ -248,7 +246,7 @@ def test_czi_reader_remote_stream_options(monkeypatch: pytest.MonkeyPatch) -> No
 
     monkeypatch.setattr(aicspylibczi_reader, "CziFile", FakeCziFile)
     aicspylibczi_reader._remote_czi.cache_clear()
-    Reader(REMOTE_URL, use_aicspylibczi=True, stream_options={"timeout": 5})
+    Reader(REMOTE_URL, stream_options={"timeout": 5})
 
     assert opened[0]["timeout"] == 5
 
@@ -542,7 +540,7 @@ def test_frame_acquisition_times_match_expected_values(
     expected_acquisition_times: List[dict[str, Any]] | None,
 ) -> None:
     uri = LOCAL_RESOURCES_DIR / filename
-    reader = Reader(uri, use_aicspylibczi=True)
+    reader = Reader(uri)
     reader.set_scene(set_scene)
 
     acquisition_times = reader.acquisition_times
@@ -565,7 +563,7 @@ def test_frame_acquisition_times_match_expected_values(
 
 def test_frame_acquisition_times_change_with_scene_selection() -> None:
     uri = LOCAL_RESOURCES_DIR / "s_3_t_1_c_3_z_5.czi"
-    reader = Reader(uri, use_aicspylibczi=True)
+    reader = Reader(uri)
 
     acquisition_times_by_scene = {}
     for scene in ("P2", "P3", "P1"):
@@ -686,7 +684,7 @@ def test_czi_reader_mosaic_tile_inspection(
     uri = LOCAL_RESOURCES_DIR / filename
 
     # Construct reader
-    reader = Reader(uri, use_aicspylibczi=True)
+    reader = Reader(uri)
     reader.set_scene(set_scene)
 
     # Check basics
@@ -771,7 +769,7 @@ def test_czi_reader_mosaic_coords(
     uri = LOCAL_RESOURCES_DIR / filename
 
     # Construct reader
-    reader = Reader(uri, use_aicspylibczi=True)
+    reader = Reader(uri)
 
     # Check tile y and x min max
     np.testing.assert_array_equal(
@@ -808,7 +806,7 @@ def test_czi_reader_mosaic_coords(
 def test_czi_reader_mosaic_window_matches_stitched(
     filename: str, set_scene: str
 ) -> None:
-    reader = Reader(LOCAL_RESOURCES_DIR / filename, use_aicspylibczi=True)
+    reader = Reader(LOCAL_RESOURCES_DIR / filename)
     reader.set_scene(set_scene)
     window = (..., slice(100, 700), slice(200, 900))
 
@@ -841,7 +839,7 @@ def test_czi_reader_mosaic_window_matches_stitched(
 def test_get_subblock_metadata(
     filename: str, set_scene: str | None, kwargs: dict, expected_count: int
 ) -> None:
-    reader = Reader(LOCAL_RESOURCES_DIR / filename, use_aicspylibczi=True)
+    reader = Reader(LOCAL_RESOURCES_DIR / filename)
     if set_scene is not None:
         reader.set_scene(set_scene)
 
@@ -873,9 +871,7 @@ def test_get_image_data_matches_full_slice_aics(
 ) -> None:
     from bioio_base import transforms
 
-    reader = Reader(
-        LOCAL_RESOURCES_DIR / filename, use_aicspylibczi=True
-    )._implementation
+    reader = Reader(LOCAL_RESOURCES_DIR / filename)._implementation
     expected = transforms.reshape_data(reader.data, reader.dims.order, order, **kwargs)
     actual = reader.get_image_data(order, **kwargs)
     np.testing.assert_array_equal(actual, expected)
@@ -884,9 +880,7 @@ def test_get_image_data_matches_full_slice_aics(
 def test_get_image_data_reads_only_requested_planes_aics(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    reader = Reader(
-        LOCAL_RESOURCES_DIR / "s_3_t_1_c_3_z_5.czi", use_aicspylibczi=True
-    )._implementation
+    reader = Reader(LOCAL_RESOURCES_DIR / "s_3_t_1_c_3_z_5.czi")._implementation
     # s_3_t_1_c_3_z_5: T=1, C=3, Z=5 -> dims CZYX. C=1 over Z=5 -> 5 plane reads.
     assert reader.dims.order == "CZYX"
 
@@ -919,9 +913,7 @@ def test_get_image_data_empty_selection_matches_full_slice_aics(
 ) -> None:
     from bioio_base import transforms
 
-    reader = Reader(
-        LOCAL_RESOURCES_DIR / filename, use_aicspylibczi=True
-    )._implementation
+    reader = Reader(LOCAL_RESOURCES_DIR / filename)._implementation
     expected = transforms.reshape_data(reader.data, reader.dims.order, order, **kwargs)
     actual = reader.get_image_data(order, **kwargs)
 

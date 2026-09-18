@@ -1,6 +1,7 @@
 # Support use of type Reader inside definition of Reader
 from __future__ import annotations
 
+import warnings
 from datetime import datetime
 from pathlib import Path
 from typing import Any, List, Optional, Tuple, Union
@@ -18,20 +19,22 @@ from ome_types.model import OME
 
 from bioio_czi import standard_metadata
 from bioio_czi.aicspylibczi_reader.reader import Reader as AicsPyLibCziReader
-from bioio_czi.pylibczirw_reader.reader import Reader as PylibCziReader
 
 from . import metadata
+
+# Sentinel so we can tell whether the deprecated use_aicspylibczi kwarg was passed.
+_USE_AICSPYLIBCZI_UNSET = object()
 
 
 class Reader(BaseReader):
     """
-    Wraps the pylibczirw and aicspylibczi APIs to provide a BioIO Reader plugin
-    for volumetric Zeiss CZI images.
+    Wraps the aicspylibczi API to provide a BioIO Reader plugin for volumetric
+    Zeiss CZI images.
     """
 
-    # Note: Any public method overridden by PylibCziReader or AicsPyLibCziReader must
-    # explicitly be defined here, using self._implementation
-    _implementation: PylibCziReader | AicsPyLibCziReader
+    # Note: Any public method overridden by AicsPyLibCziReader must explicitly be
+    # defined here, using self._implementation
+    _implementation: AicsPyLibCziReader
 
     # Although _fs is named with an underscore, it is used by tests, so must be exposed
     # from the implementation.
@@ -72,24 +75,20 @@ class Reader(BaseReader):
         supported: bool
             Boolean value indicating if the file is supported by the reader.
         """
-        errors = []
-        try:
-            if PylibCziReader._is_supported_image(fs, path, **kwargs):
-                return True
-        except Exception as e:
-            errors.append(str(e))
         try:
             if AicsPyLibCziReader._is_supported_image(fs, path, **kwargs):
                 return True
         except Exception as e:
-            errors.append(str(e))
-        error_message = (", ").join(errors)
-        raise UnsupportedFileFormatError(
-            reader_name="bioio-czi ", path=path, msg_extra=error_message
-        )
+            raise UnsupportedFileFormatError(
+                reader_name="bioio-czi ", path=path, msg_extra=str(e)
+            )
+        raise UnsupportedFileFormatError(reader_name="bioio-czi ", path=path)
 
     def __init__(
-        self, image: PathLike, use_aicspylibczi: bool = True, **kwargs: Any
+        self,
+        image: PathLike,
+        use_aicspylibczi: Any = _USE_AICSPYLIBCZI_UNSET,
+        **kwargs: Any,
     ) -> None:
         """
         Parameters
@@ -97,35 +96,40 @@ class Reader(BaseReader):
         image: types.PathLike
             Path to image file.
         use_aicspylibczi: bool
-            Read CZIs with the aicspylibczi library, which can read individual tiles
-            and subblock metadata. Set to False to read with pylibczirw instead.
-            Default: True
+            Deprecated and ignored. bioio-czi now always reads with the aicspylibczi
+            library. Passing use_aicspylibczi=False raises, as the pylibczirw backend
+            has been removed.
         chunk_dims: Union[str, List[str]]
-            Ignored unless use_aicspylibczi is True.
             Which dimensions to create chunks for.
             Default: DEFAULT_CHUNK_DIMS
             Note: DimensionNames.SpatialY, DimensionNames.SpatialX, and
             DimensionNames.Samples, will always be added to the list if not present
             during dask array construction.
         include_subblock_metadata: bool
-            Ignored unless use_aicspylibczi is True.
             Whether to append metadata from the subblocks to the rest of the embeded
             metadata.
         fs_kwargs: Dict[str, Any]
-            Ignored unless use_aicspylibczi is True.
             Any specific keyword arguments to pass to the fsspec-created filesystem.
             For http(s) URLs this only affects checking that the file exists.
             Default: {}
         stream_options: Optional[Dict[str, Any]]
-            Ignored unless use_aicspylibczi is True.
             libCZI curl stream options for http(s) URLs, e.g. ``{"timeout": 60}`` or
             ``{"xoauth2_bearer": token}``. Ignored for local files.
             Default: None
         """
-        if use_aicspylibczi:
-            self._implementation = AicsPyLibCziReader(image, **kwargs)
-        else:
-            self._implementation = PylibCziReader(image, **kwargs)
+        if use_aicspylibczi is not _USE_AICSPYLIBCZI_UNSET:
+            if not use_aicspylibczi:
+                raise ValueError(
+                    "The pylibczirw backend has been removed; use_aicspylibczi=False "
+                    "is no longer supported. bioio-czi now always uses aicspylibczi."
+                )
+            warnings.warn(
+                "use_aicspylibczi is deprecated and has no effect; bioio-czi always "
+                "reads with aicspylibczi now.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        self._implementation = AicsPyLibCziReader(image, **kwargs)
 
     @property
     def scenes(self) -> Tuple[str, ...]:
@@ -182,10 +186,7 @@ class Reader(BaseReader):
         name : str
             Human-readable identifier for this Reader instance.
 
-            Delegates to the active backend implementation, e.g.:
-
-            * "bioio-czi-pylibczirw"
-            * "bioio-czi-aicspylibczi"
+            Delegates to the backend implementation, i.e. "bioio-czi-aicspylibczi".
         """
         return self._implementation.name
 
@@ -265,12 +266,6 @@ class Reader(BaseReader):
 
             It is additionally recommended to closely monitor how dask array chunks are
             managed.
-
-        Notes
-        -----
-        Shape of returned array depends on the value of use_aicspylibczi. If
-        use_aicspylibczi is not True, any scenes with multiple tiles will be
-        automatically stitched (where tiles overlap, the highest M-index wins).
         """
         return self._implementation._read_delayed()
 
@@ -282,12 +277,6 @@ class Reader(BaseReader):
         -------
         data: xarray.DataArray
             The fully read data array.
-
-        Notes
-        -----
-        Shape of returned array depends on the value of use_aicspylibczi. If
-        use_aicspylibczi is not True, any scenes with multiple tiles will be
-        automatically stitched (where tiles overlap, the highest M-index wins).
         """
         return self._implementation._read_immediate()
 
@@ -298,10 +287,6 @@ class Reader(BaseReader):
         mosaic: xarray.DataArray
             The fully stitched together image. Contains all the dimensions of the image
             with the YX expanded to the full mosaic.
-
-        Notes
-        -----
-        Shape of returned array depends on the value of use_aicspylibczi.
         """
         return self._implementation._get_stitched_dask_mosaic()
 
@@ -312,10 +297,6 @@ class Reader(BaseReader):
         mosaic: numpy.ndarray
             The fully stitched together image. Contains all the dimensions of the image
             with the YX expanded to the full mosaic.
-
-        Notes
-        -----
-        Shape of returned array depends on the value of use_aicspylibczi.
         """
         return self._implementation._get_stitched_mosaic()
 
@@ -380,7 +361,7 @@ class Reader(BaseReader):
         # NOTE:
         # The OME metadata generated via XSLT reflects the raw CZI XML, which may
         # describe the original acquisition frame dimensions. However, the actual
-        # pixel data exposed by this reader is derived from pylibCZIrw bounding boxes
+        # pixel data exposed by this reader is derived from libCZI bounding boxes
         # (e.g., scene-specific ROI, stitching, and no-pyramid extents), which can
         # differ from the XML-reported sizes.
         #
@@ -526,11 +507,6 @@ class Reader(BaseReader):
         dimension indices, e.g. ``T=0, C=1`` or ``M=3``, as a single ``Subblocks``
         element. Only the matching subblocks are read from the file. The scene is
         the current scene; select it with set_scene rather than S.
-
-        Raises
-        ------
-        NotImplementedError
-            The reader was not constructed with use_aicspylibczi=True.
         """
         return self._implementation.get_subblock_metadata(**kwargs)
 
@@ -557,9 +533,9 @@ class Reader(BaseReader):
         # standard_metadata.timelapse_interval is set to self.time_interval.
         metadata = super().standard_metadata
 
-        # 2. Most of the remaining implementation is identical across pylibczirw and
-        # aicspylibczi modes, so it is shared here. The self-contained standard_metadata
-        # module holds the implementation for extracting these from the metadata.
+        # 2. The rest is shared here rather than in the implementation. The
+        # self-contained standard_metadata module holds the logic for extracting
+        # these fields from the metadata.
         czi_scene_index = self._implementation.czi_scene_index
         metadata.column = standard_metadata.column(self.metadata, czi_scene_index)
         metadata.position_index = standard_metadata.position_index(self.current_scene)
@@ -567,8 +543,7 @@ class Reader(BaseReader):
         metadata.stage_position_x, metadata.stage_position_y = (
             standard_metadata.scene_stage_position(self.metadata, czi_scene_index)
         )
-        # 3. Finally, total_time_duration is mode-specific, as only aicspylibczi mode
-        # has access to the necessary subblock metadata.
+        # 3. Finally, total_time_duration is derived from the subblock metadata.
         metadata.timelapse_interval = self.time_interval
         metadata.total_time_duration = self._implementation.total_time_duration
 
