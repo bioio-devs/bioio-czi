@@ -8,7 +8,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Generator, Hashable, List, Optional, Tuple, Union
 
-import certifi
 import dask.array as da
 import numpy as np
 import xarray as xr
@@ -65,9 +64,7 @@ PIXEL_DICT = {
 
 @functools.lru_cache(maxsize=16)
 def _remote_czi(url: str, stream_options: Tuple[Tuple[str, Any], ...]) -> CziFile:
-    # The bundled libcurl has no usable default CA bundle on Linux; use certifi's.
-    options = {"ca_info": certifi.where(), **dict(stream_options)}
-    return CziFile(url, stream_options=options)
+    return CziFile(url, stream_options=dict(stream_options))
 
 
 @contextmanager

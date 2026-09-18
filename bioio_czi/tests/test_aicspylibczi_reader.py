@@ -251,7 +251,6 @@ def test_czi_reader_remote_stream_options(monkeypatch: pytest.MonkeyPatch) -> No
     Reader(REMOTE_URL, use_aicspylibczi=True, stream_options={"timeout": 5})
 
     assert opened[0]["timeout"] == 5
-    assert opened[0]["ca_info"]
 
 
 def _normalize_entries(entries: List[dict[str, Any]]) -> List[dict[str, int | str]]:

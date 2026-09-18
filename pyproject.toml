@@ -29,10 +29,9 @@ classifiers = [
 ]
 dynamic = ["version"]
 dependencies = [
-  "aicspylibczi>=4.0.0",
+  "aicspylibczi>=4.0.1",
   "aiohttp",
   "bioio-base>=3.4.0",
-  "certifi",
   "dask[array]>=2021.4.1",
   "fsspec>=2022.8.0",
   "lxml>=4.6",
