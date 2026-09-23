@@ -1,6 +1,7 @@
 # Support use of type Reader inside definition of Reader
 from __future__ import annotations
 
+import warnings
 from datetime import datetime
 from pathlib import Path
 from typing import Any, List, Optional, Tuple, Union
@@ -100,6 +101,8 @@ class Reader(BaseReader):
             Read CZIs with the aicspylibczi library, which can read individual tiles
             and subblock metadata. Set to False to read with pylibczirw instead.
             Default: True
+            Deprecated: pylibczirw mode (use_aicspylibczi=False) will be removed in
+            the next major release.
         chunk_dims: Union[str, List[str]]
             Ignored unless use_aicspylibczi is True.
             Which dimensions to create chunks for.
@@ -125,6 +128,13 @@ class Reader(BaseReader):
         if use_aicspylibczi:
             self._implementation = AicsPyLibCziReader(image, **kwargs)
         else:
+            warnings.warn(
+                "use_aicspylibczi=False (pylibczirw mode) is deprecated and will be "
+                "removed in the next major release of bioio-czi. Remove the "
+                "argument to read with aicspylibczi.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
             self._implementation = PylibCziReader(image, **kwargs)
 
     @property
