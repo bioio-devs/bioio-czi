@@ -46,10 +46,6 @@ Install bioio-czi alongside bioio:
 - `BioImage(...).standard_metadata.timelapse_interval`
 - `BioImage(...).standard_metadata.total_time_duration`
 
-> **Note:** The `pylibczirw` backend has been removed. `bioio-czi` now always reads
-> with `aicspylibczi`; the `use_aicspylibczi` argument is deprecated and passing
-> `use_aicspylibczi=False` raises an error.
-
 ## Example Usage (see full documentation for more examples)
 
 ### Basic usage

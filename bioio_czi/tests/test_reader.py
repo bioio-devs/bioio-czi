@@ -926,25 +926,3 @@ def test_get_image_data_empty_selection_matches_full_slice_aics(
 def test_reader_name() -> None:
     reader = Reader(LOCAL_RESOURCES_DIR / "S=2_4x2_T=2=Z=3_CH=2.czi")
     assert reader.name == "bioio-czi-aicspylibczi"
-
-
-def test_use_aicspylibczi_true_is_deprecated() -> None:
-    # The kwarg still works but warns, since aicspylibczi is now the only backend.
-    uri = LOCAL_RESOURCES_DIR / "S=2_4x2_T=2=Z=3_CH=2.czi"
-    with pytest.warns(DeprecationWarning):
-        Reader(uri, use_aicspylibczi=True)
-
-
-def test_use_aicspylibczi_false_raises() -> None:
-    # The pylibczirw backend is gone, so requesting it is an error.
-    uri = LOCAL_RESOURCES_DIR / "S=2_4x2_T=2=Z=3_CH=2.czi"
-    with pytest.raises(ValueError):
-        Reader(uri, use_aicspylibczi=False)
-
-
-def test_use_aicspylibczi_none_does_not_raise() -> None:
-    # Only an explicit False requests the removed backend; None is not that.
-    uri = LOCAL_RESOURCES_DIR / "S=2_4x2_T=2=Z=3_CH=2.czi"
-    with pytest.warns(DeprecationWarning):
-        reader = Reader(uri, use_aicspylibczi=None)
-    assert reader.name == "bioio-czi-aicspylibczi"

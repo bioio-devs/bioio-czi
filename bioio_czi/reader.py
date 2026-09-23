@@ -1,7 +1,6 @@
 import functools
 import itertools
 import logging
-import warnings
 import xml.etree.ElementTree as ET
 from contextlib import contextmanager
 from copy import copy
@@ -42,9 +41,6 @@ from .subblock_metadata import acquisition_times, time_between_subblocks
 log = logging.getLogger(__name__)
 
 ###############################################################################
-
-# Sentinel so we can tell whether the deprecated use_aicspylibczi kwarg was passed.
-_USE_AICSPYLIBCZI_UNSET = object()
 
 CZI_SAMPLES_DIM_CHAR = "A"
 CZI_BLOCK_DIM_CHAR = "B"
@@ -140,7 +136,6 @@ class Reader(BaseReader):
         include_subblock_metadata: bool = False,
         fs_kwargs: Dict[str, Any] = {},
         stream_options: Optional[Dict[str, Any]] = None,
-        use_aicspylibczi: Any = _USE_AICSPYLIBCZI_UNSET,
     ):
         """
         Parameters
@@ -165,24 +160,7 @@ class Reader(BaseReader):
             libCZI curl stream options for http(s) URLs, e.g. ``{"timeout": 60}`` or
             ``{"xoauth2_bearer": token}``. Ignored for local files.
             Default: None
-        use_aicspylibczi: bool
-            Deprecated and ignored. bioio-czi now always reads with the aicspylibczi
-            library. Passing use_aicspylibczi=False raises, as the pylibczirw backend
-            has been removed.
         """
-        if use_aicspylibczi is not _USE_AICSPYLIBCZI_UNSET:
-            if use_aicspylibczi is False:
-                raise ValueError(
-                    "The pylibczirw backend has been removed; use_aicspylibczi=False "
-                    "is no longer supported. bioio-czi now always uses aicspylibczi."
-                )
-            warnings.warn(
-                "use_aicspylibczi is deprecated and has no effect; bioio-czi always "
-                "reads with aicspylibczi now.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
         # Expand details of provided image
         self._fs, self._path = io_utils.pathlike_to_fs(
             image,
