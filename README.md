@@ -5,7 +5,7 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Python 3.10–3.13](https://img.shields.io/badge/python-3.10--3.13-blue.svg)](https://www.python.org/downloads/)
 
-A BioIO reader plugin for reading CZIs using `aicspylibczi` (default) or `pylibczirw`.
+A BioIO reader plugin for reading CZIs using `aicspylibczi` (default) or `pylibczirw` (deprecated).
 
 ---
 
@@ -30,6 +30,8 @@ Install bioio-czi alongside bioio:
 ## pylibczirw vs. aicspylibczi
 
 `bioio-czi` can operate in [aicspylibczi](https://github.com/bioio-devs/aicspylibczi) mode (the default) or [pylibczirw](https://github.com/ZEISS/pylibczirw) mode.
+
+> **Deprecated:** pylibczirw mode (`use_aicspylibczi=False`) is deprecated and will be removed in the next major release, along with the `use_aicspylibczi` parameter. aicspylibczi mode now covers everything pylibczirw mode did, including remote reads. Using `use_aicspylibczi=False` emits a `DeprecationWarning`.
 
 | Feature                                             | pylibczirw mode | aicspylibczi mode |
 | --------------------------------------------------- | --------------- | ----------------- |
