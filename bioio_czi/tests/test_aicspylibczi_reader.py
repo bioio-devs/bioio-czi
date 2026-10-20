@@ -14,6 +14,7 @@ from dateutil import parser
 
 from bioio_czi import Reader
 from bioio_czi.aicspylibczi_reader import reader as aicspylibczi_reader
+from bioio_czi.aicspylibczi_reader import subblock_metadata
 from bioio_czi.aicspylibczi_reader.reader import Reader as AicsPyLibCziReader
 
 from .conftest import LOCAL_RESOURCES_DIR
@@ -930,3 +931,37 @@ def test_get_image_data_empty_selection_matches_full_slice_aics(
     assert 0 in actual.shape
     assert actual.shape == expected.shape
     np.testing.assert_array_equal(actual, expected)
+
+
+@pytest.mark.parametrize(
+    "acquisition_time, expected",
+    [
+        (
+            "2019-06-27T18:39:26.6459707Z",
+            datetime.datetime(
+                2019, 6, 27, 18, 39, 26, 645970, tzinfo=datetime.timezone.utc
+            ),
+        ),
+        # ZEN writes this placeholder when no acquisition time was recorded, e.g. in
+        # the subblocks of a maximum intensity projection.
+        ("0001-01-01T00:00:00.0000000", None),
+        ("", None),
+    ],
+)
+def test_subblock_acquisition_time(
+    acquisition_time: str, expected: datetime.datetime | None
+) -> None:
+    # Arrange
+    metadata = (
+        "<METADATA><Tags>"
+        f"<AcquisitionTime>{acquisition_time}</AcquisitionTime>"
+        "</Tags></METADATA>"
+    )
+
+    # Act
+    actual = subblock_metadata._extract_acquisition_time_from_subblock_metadata(
+        metadata
+    )
+
+    # Assert
+    assert actual == expected
