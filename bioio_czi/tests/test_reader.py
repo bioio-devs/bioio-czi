@@ -11,6 +11,7 @@ from _aicspylibczi import PylibCZI_CDimCoordinatesOverspecifiedException
 from aicspylibczi import CziFile
 from bioio_base import dimensions, exceptions, test_utilities
 from dateutil import parser
+from ome_types import OME
 
 from bioio_czi import Reader
 from bioio_czi import reader as czi_reader
@@ -961,3 +962,15 @@ def test_subblock_acquisition_time(
 
     # Assert
     assert actual == expected
+
+
+def test_ome_metadata_without_optional_channel_metadata() -> None:
+    # Arrange
+    uri = LOCAL_RESOURCES_DIR / "minimal_metadata.czi"
+
+    # Act
+    ome = Reader(uri).ome_metadata
+
+    # Assert
+    assert isinstance(ome, OME)
+    assert len(ome.images[0].pixels.channels) == 2
