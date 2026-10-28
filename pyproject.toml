@@ -37,7 +37,6 @@ dependencies = [
   "lxml>=4.6",
   'lxml>=5; python_version >= "3.13"',
   "ome-types>=0.3.4",
-  "pylibczirw",
   "python-dateutil>=2.9.0.post0",
   "requests",
   "xarray>=2022.6.0",

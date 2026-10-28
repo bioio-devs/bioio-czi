@@ -5,7 +5,7 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Python 3.10–3.13](https://img.shields.io/badge/python-3.10--3.13-blue.svg)](https://www.python.org/downloads/)
 
-A BioIO reader plugin for reading CZIs using `aicspylibczi` (default) or `pylibczirw` (deprecated).
+A BioIO reader plugin for reading CZIs using `aicspylibczi`.
 
 ---
 
@@ -27,30 +27,24 @@ Install bioio-czi alongside bioio:
 **Stable Release:** `pip install bioio-czi`<br>
 **Development Head:** `pip install git+https://github.com/bioio-devs/bioio-czi.git`
 
-## pylibczirw vs. aicspylibczi
+## Reading with aicspylibczi
 
-`bioio-czi` can operate in [aicspylibczi](https://github.com/bioio-devs/aicspylibczi) mode (the default) or [pylibczirw](https://github.com/ZEISS/pylibczirw) mode.
+`bioio-czi` reads CZIs with [aicspylibczi](https://github.com/bioio-devs/aicspylibczi), which supports:
 
-> **Deprecated:** pylibczirw mode (`use_aicspylibczi=False`) is deprecated and will be removed in the next major release, along with the `use_aicspylibczi` parameter. aicspylibczi mode now covers everything pylibczirw mode did, including remote reads. Using `use_aicspylibczi=False` emits a `DeprecationWarning`.
-
-| Feature                                             | pylibczirw mode | aicspylibczi mode |
-| --------------------------------------------------- | --------------- | ----------------- |
-| Read CZIs from the internet                         | ✅              | ✅                |
-| Read single tile from tiled CZI                     | ❌              | ✅                |
-| Read single tile's metadata from tiled CZI          | ❌              | ✅                |
-| Read elapsed time metadata\*                        | ❌              | ✅                |
-| Handle CZIs with different dimensions per scene\*\* | ❌              | ✅                |
-| Read stitched mosaic of a tiled CZI                 | ✅              | ✅                |
-
-The primary difference is that `pylibczirw` cannot access individual tiles or subblock metadata from a tiled CZI. To use `pylibczirw`, add the `use_aicspylibczi=False` parameter when creating a reader. For example: `from bioio import BioImage; img = BioImage(..., use_aicspylibczi=False)`.
+| Feature                                         |
+| ----------------------------------------------- |
+| Read CZIs from the internet                     |
+| Read single tile from tiled CZI                 |
+| Read single tile's metadata from tiled CZI      |
+| Read elapsed time metadata\*                    |
+| Handle CZIs with different dimensions per scene |
+| Read stitched mosaic of a tiled CZI             |
 
 \*Elapsed time metadata include the following. These are derived from individual subblock metadata.
 
 - `BioImage(...).time_interval`
 - `BioImage(...).standard_metadata.timelapse_interval`
 - `BioImage(...).standard_metadata.total_time_duration`
-
-\*\*The underlying pylibczirw reader only exposes per-scene X and Y dimensions. Files that do not have consistent dimensions per scene may be read incorrectly in pylibczirw mode.
 
 ## Example Usage (see full documentation for more examples)
 
