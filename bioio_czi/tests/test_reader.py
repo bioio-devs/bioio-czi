@@ -965,8 +965,7 @@ def test_subblock_acquisition_time(
 
 
 def test_ome_metadata_without_optional_channel_metadata() -> None:
-    # Arrange: file written by pylibCZIrw, which writes no AcquisitionMode or other
-    # optional channel metadata (https://github.com/bioio-devs/bioio-czi/issues/50)
+    # Arrange
     uri = LOCAL_RESOURCES_DIR / "minimal_metadata.czi"
 
     # Act
