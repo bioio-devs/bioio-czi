@@ -23,6 +23,10 @@ def _extract_acquisition_time_from_subblock_metadata(
     if acquisition_time_element is not None and acquisition_time_element.text:
         try:
             acquisition_time = parser.isoparse(str(acquisition_time_element.text))
+            # ZEN writes 0001-01-01T00:00:00 when the acquisition time is not set
+            # (e.g., in processed images such as maximum intensity projections).
+            if acquisition_time.year == 1:
+                return None
             # Keep acquisition timestamps timezone-aware. If timezone is missing in the
             # source metadata, default to UTC for consistent comparisons.
             if acquisition_time.tzinfo is None:
