@@ -149,8 +149,8 @@ class Reader(BaseReader):
             DimensionNames.Samples, will always be added to the list if not present
             during dask array construction.
         include_subblock_metadata: bool
-            Whether to append metadata from the subblocks to the rest of the embeded
-            metadata.
+            Whether to append metadata from the current scene's subblocks to the
+            rest of the embeded metadata.
         fs_kwargs: Dict[str, Any]
             Any specific keyword arguments to pass to the fsspec-created filesystem.
             For http(s) URLs this only affects checking that the file exists; the
@@ -847,7 +847,9 @@ class Reader(BaseReader):
 
             # Append subblock metadata to the other metadata if param is True
             if self._include_subblock_metadata:
-                subblocks = czi.read_subblock_metadata(unified_xml=True)
+                subblocks = czi.read_subblock_metadata(
+                    unified_xml=True, S=self.czi_scene_index
+                )
                 meta.append(subblocks)
 
             # Store pixel sizes
