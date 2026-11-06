@@ -13,9 +13,8 @@ from bioio_base import dimensions, exceptions, test_utilities
 from dateutil import parser
 from ome_types import OME
 
-from bioio_czi import Reader
+from bioio_czi import Reader, subblock_metadata
 from bioio_czi import reader as czi_reader
-from bioio_czi import subblock_metadata
 
 from .conftest import LOCAL_RESOURCES_DIR
 
