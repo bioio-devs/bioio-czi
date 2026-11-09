@@ -13,9 +13,8 @@ import numpy as np
 import xarray as xr
 from _aicspylibczi import BBox
 from aicspylibczi import CziFile
-from bioio_base import constants, exceptions
+from bioio_base import constants, exceptions, types
 from bioio_base import io as io_utils
-from bioio_base import types
 from bioio_base.dimensions import (
     DEFAULT_CHUNK_DIMS,
     REQUIRED_CHUNK_DIMS,
@@ -824,7 +823,6 @@ class Reader(BaseReader):
             The file could not be read or is not supported.
         """
         with open_czi(self._fs, self._path, self._stream_options) as czi:
-
             dims_shape = Reader._dims_shape_to_scene_dims_shape(
                 dims_shape=czi.get_dims_shape(),
                 scene_index=self.current_scene_index,
@@ -1140,7 +1138,6 @@ class Reader(BaseReader):
             raise exceptions.UnexpectedShapeError("No mosaic dimension in image.")
 
         with open_czi(self._fs, self._path, self._stream_options) as czi:
-
             # Default Channel and Time dimensions to 0 to improve
             # worst case read time for large files **only**
             # when those dimensions are present on the image.
@@ -1182,7 +1179,6 @@ class Reader(BaseReader):
             raise exceptions.UnexpectedShapeError("No mosaic dimension in image.")
 
         with open_czi(self._fs, self._path, self._stream_options) as czi:
-
             tile_info_to_bboxes = czi.get_all_mosaic_tile_bounding_boxes(
                 S=self.czi_scene_index, **kwargs
             )
