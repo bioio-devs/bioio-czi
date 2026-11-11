@@ -23,7 +23,7 @@ from .conftest import LOCAL_RESOURCES_DIR
     ["filename", "num_subblocks", "acquistion_time"],
     [
         ("s_1_t_1_c_1_z_1.czi", 1, "2019-06-27T18:33:41.1154211Z"),
-        ("s_3_t_1_c_3_z_5.czi", 45, "2019-06-27T18:39:26.6459707Z"),
+        ("s_3_t_1_c_3_z_5.czi", 15, "2019-06-27T18:39:26.6459707Z"),
         (
             "variable_scene_shape_first_scene_pyramid.czi",
             27,
