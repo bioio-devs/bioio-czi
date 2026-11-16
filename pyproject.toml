@@ -13,7 +13,7 @@ name = "bioio-czi"
 description = "A Bioio reader plugin for reading czi images."
 keywords = []
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = { file = "LICENSE" }
 authors = [
   { email = "brian.whitney@alleninstitute.org", name = "bioio-devs" },
@@ -22,7 +22,6 @@ classifiers = [
   "Development Status :: 4 - Beta",
   "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
   "Natural Language :: English",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
@@ -83,7 +82,7 @@ exclude = ["*docs/*", "*tests/*"]
 # tools
 [tool.ruff]
 line-length = 88
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]
